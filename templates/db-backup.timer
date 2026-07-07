@@ -1,0 +1,10 @@
+[Unit]
+Description=Run <APP_NAME> PostgreSQL backup nightly
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+Unit=<APP_NAME>-db-backup.service
+
+[Install]
+WantedBy=timers.target

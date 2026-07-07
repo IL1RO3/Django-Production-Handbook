@@ -1,0 +1,21 @@
+[Unit]
+Description=<APP_NAME> Django ASGI application via Uvicorn
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=<APP_USER>
+Group=<APP_USER>
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

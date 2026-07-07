@@ -1,0 +1,9 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+site/
+book/_book/
+.env
+.env.*
+!.env.example

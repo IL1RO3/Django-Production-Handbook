@@ -1,0 +1,23 @@
+[Unit]
+Description=<APP_NAME> Django application via Gunicorn
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=<APP_USER>
+Group=<APP_USER>
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+ExecStart=/srv/<APP_NAME>/venv/bin/gunicorn \
+  --workers 3 \
+  --bind 127.0.0.1:8000 \
+  --access-logfile - \
+  --error-logfile - \
+  <PROJECT_PACKAGE>.wsgi:application
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
