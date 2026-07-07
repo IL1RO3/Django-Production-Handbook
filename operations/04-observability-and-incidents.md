@@ -1,4 +1,4 @@
-# 24. Logging, monitoring, and incident response
+# 27. Logging, monitoring, and incident response
 
 ## Logs are evidence
 
@@ -35,6 +35,51 @@ curl -I http://127.0.0.1:8000/
 sudo tail -n 100 /var/log/nginx/error.log
 ```
 
+## Structured application logging
+
+Plain tracebacks are useful, but production logs should also answer operational questions. Include request ID, release version, user/account identifier when safe, endpoint, status code, latency, and external dependency name. Never log passwords, tokens, session cookies, full credit-card data, or private payloads.
+
+A practical flow is:
+
+```text
+request enters proxy
+  -> request ID is assigned or preserved
+  -> Django includes it in logs/errors
+  -> error tracker links traceback to release
+  -> deployment history shows what changed
+```
+
+## Metrics, alerts, and dashboards
+
+Metrics are numeric signals over time. Alerts are rules that notify a human when a signal needs action. Dashboards are for investigation; they are not a substitute for alerts.
+
+Useful starter alerts:
+
+| Alert | Why it matters |
+|---|---|
+| HTTPS health check fails | users may not reach the app |
+| repeated 5xx responses | app or dependency is failing |
+| disk usage above threshold | logs/uploads/database can stop the server |
+| certificate expires soon | HTTPS outage is predictable and preventable |
+| backup job failed | recovery point objective is at risk |
+| service restart loop | systemd is keeping a broken process alive |
+| database connection exhaustion | requests may fail even while CPU looks fine |
+
+## Tool choices
+
+Common options:
+
+| Tool | Typical use |
+|---|---|
+| Sentry | Django exception tracking, releases, performance samples |
+| UptimeRobot/Better Stack/Pingdom | external uptime checks |
+| Prometheus | metrics collection and alert rules |
+| Grafana | metrics dashboards |
+| Netdata | quick host-level visibility |
+| systemd journal | first source for service logs on a VPS |
+
+Use managed tools when they reduce operational load. Self-host monitoring only when you can also monitor, back up, upgrade, and secure the monitoring system.
+
 ## Monitoring layers
 
 A useful small-app stack:
@@ -58,3 +103,17 @@ Monitoring does not prevent every failure. It reduces time-to-detection and give
 ```
 
 Avoid changing five unrelated variables while debugging. That destroys the evidence needed to understand the actual cause.
+
+## Post-incident review
+
+After recovery, write a short review while the evidence is fresh:
+
+- impact window and affected users;
+- triggering change or external event;
+- detection source;
+- what worked during response;
+- what slowed response;
+- permanent fixes, tests, alerts, or docs to add;
+- owner and due date for each follow-up.
+
+The point is not blame. The point is to make the next failure smaller, faster to detect, or easier to recover from.

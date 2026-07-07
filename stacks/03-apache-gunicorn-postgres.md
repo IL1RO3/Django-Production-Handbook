@@ -1,4 +1,4 @@
-# 15. Apache + Gunicorn + PostgreSQL
+# 16. Apache + Gunicorn + PostgreSQL
 
 Use this stack when Apache is already your web-server standard or you prefer its virtual-host/module ecosystem.
 

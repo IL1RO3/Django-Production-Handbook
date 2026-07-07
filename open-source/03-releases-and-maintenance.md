@@ -1,4 +1,4 @@
-# 30. Releases, SemVer, changelogs, and support
+# 33. Releases, SemVer, changelogs, and support
 
 ## Git commits, tags, and releases
 
@@ -53,3 +53,25 @@ A useful release note includes:
 ## Support boundaries
 
 State what is supported: Python/Django versions, database version, Linux target, deployment patterns, browser support, and security support window. Clear boundaries prevent users from assuming an untested configuration is guaranteed.
+
+## Release checklist
+
+Before publishing a release:
+
+- run link and Markdown checks if available;
+- verify examples against supported Django/Python versions where practical;
+- confirm templates match the chapters;
+- update changelog and upgrade notes;
+- tag the release;
+- publish human-readable release notes;
+- announce breaking changes clearly.
+
+For a GitBook, also verify that navigation renders correctly after Git sync and that renamed pages do not leave broken links.
+
+## Maintenance rhythm
+
+Production guidance ages. Review the book on a schedule for Django LTS changes, Ubuntu LTS changes, PostgreSQL support windows, TLS/certificate client changes, package names, and deployment-tool behavior. Mark unverified patterns as unverified rather than letting readers assume they are current.
+
+## Security maintenance
+
+Security fixes should have a private intake path, a clear maintainer owner, a release note that avoids unnecessary exploit detail, and a supported-version statement. If a vulnerable command or configuration appears in the book, fix the chapter, template, reference checklist, and any all-in-one appendix that repeats it.

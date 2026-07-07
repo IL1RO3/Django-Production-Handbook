@@ -1,4 +1,4 @@
-# 20. PaaS, managed hosting, serverless, and Kubernetes
+# 21. PaaS, managed hosting, serverless, and Kubernetes
 
 ## Managed PaaS
 

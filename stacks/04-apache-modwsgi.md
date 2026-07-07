@@ -1,4 +1,4 @@
-# 16. Apache + mod_wsgi
+# 17. Apache + mod_wsgi
 
 `mod_wsgi` is an Apache module that hosts Python WSGI applications. This removes Gunicorn from the architecture:
 

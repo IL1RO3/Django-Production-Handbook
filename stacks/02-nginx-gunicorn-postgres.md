@@ -1,4 +1,4 @@
-# 14. Nginx + Gunicorn + PostgreSQL
+# 15. Nginx + Gunicorn + PostgreSQL
 
 This is the recommended reference stack for a first conventional Django VPS deployment.
 

@@ -1,4 +1,4 @@
-# 12. systemd and environment files
+# 13. systemd and environment files
 
 `systemd` is the service manager on modern Ubuntu. It starts services at boot, restarts failed services according to policy, records journal logs, and provides a stable operational interface.
 

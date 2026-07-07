@@ -1,4 +1,4 @@
-# 19. Docker Compose
+# 20. Docker Compose
 
 Docker packages processes and dependencies into images/containers. Docker Compose describes a multi-service application in YAML.
 

@@ -1,4 +1,4 @@
-# 17. Caddy + Gunicorn
+# 18. Caddy + Gunicorn
 
 Caddy is a web server and reverse proxy with automatic HTTPS as a central feature.
 

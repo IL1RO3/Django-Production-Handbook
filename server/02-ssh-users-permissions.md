@@ -1,4 +1,4 @@
-# 10. SSH, users, permissions, and directories
+# 11. SSH, users, permissions, and directories
 
 ## First login baseline
 

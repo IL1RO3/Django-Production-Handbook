@@ -1,4 +1,4 @@
-# 22. Firewall, SSH, Fail2Ban, and host security
+# 25. Firewall, SSH, Fail2Ban, and host security
 
 ## UFW baseline
 

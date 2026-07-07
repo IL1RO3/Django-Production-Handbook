@@ -1,4 +1,4 @@
-# 21. TLS, HTTPS, redirects, and HSTS
+# 24. TLS, HTTPS, redirects, and HSTS
 
 HTTPS is HTTP protected by TLS. TLS provides confidentiality, integrity, and server identity verification for browser-to-server traffic.
 

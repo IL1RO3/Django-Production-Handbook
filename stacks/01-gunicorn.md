@@ -1,4 +1,4 @@
-# 13. Gunicorn: the WSGI application server
+# 14. Gunicorn: the WSGI application server
 
 Gunicorn imports the Django WSGI application and manages Python worker processes. It is the bridge between your reverse proxy and Django.
 
