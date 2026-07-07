@@ -213,6 +213,201 @@ Persistent=true
 
 This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
 
+## `templates/apache-gunicorn.conf`
+
+```apache
+<VirtualHost *:80>
+```
+
+This starts an Apache site that accepts HTTP requests on port 80.
+
+```apache
+ServerName <DOMAIN>
+ServerAlias <WWW_DOMAIN>
+```
+
+These hostnames decide which requests belong to this site. They should match DNS, TLS certificate names, and Django `ALLOWED_HOSTS`.
+
+```apache
+Alias /static/ /srv/<APP_NAME>/staticfiles/
+<Directory /srv/<APP_NAME>/staticfiles/>
+    Require all granted
+</Directory>
+```
+
+`Alias` maps the URL path to a directory. The `<Directory>` block permits Apache to serve that directory. Apache needs both the mapping and the permission.
+
+```apache
+ProxyPreserveHost On
+```
+
+Pass the browser's original hostname through to Django instead of replacing it with `127.0.0.1:8000`.
+
+```apache
+RequestHeader set X-Forwarded-Proto "http"
+```
+
+Tell Django the original public scheme. In the HTTPS vhost this should become `https`.
+
+```apache
+ProxyPass /static/ !
+ProxyPass /media/ !
+```
+
+Exclude static and media paths from proxying. Apache serves those files directly.
+
+```apache
+ProxyPass / http://127.0.0.1:8000/
+ProxyPassReverse / http://127.0.0.1:8000/
+```
+
+Forward dynamic requests to private Gunicorn and rewrite upstream redirect headers back into public-facing URLs.
+
+## `templates/apache-modwsgi.conf`
+
+```apache
+WSGIDaemonProcess <APP_NAME> \
+    python-home=/srv/<APP_NAME>/venv \
+    python-path=/srv/<APP_NAME>/app \
+    processes=2 threads=15
+```
+
+Create a mod_wsgi daemon group for the Django app. `python-home` points to the virtualenv. `python-path` points to the project source. `processes` and `threads` control concurrency.
+
+```apache
+WSGIProcessGroup <APP_NAME>
+```
+
+Use that daemon group for this virtual host.
+
+```apache
+WSGIScriptAlias / /srv/<APP_NAME>/app/<PROJECT_PACKAGE>/wsgi.py
+```
+
+Map the entire site to Django's WSGI entrypoint file.
+
+```apache
+<Files wsgi.py>
+    Require all granted
+</Files>
+```
+
+Allow Apache to load the WSGI entrypoint. This is not a permission to expose all source files as downloads.
+
+## `templates/Caddyfile`
+
+```caddyfile
+<DOMAIN>, <WWW_DOMAIN> {
+```
+
+Define the hostnames for this site. Caddy uses these names for automatic HTTPS when DNS points to the server.
+
+```caddyfile
+encode zstd gzip
+```
+
+Enable compression for suitable responses.
+
+```caddyfile
+handle_path /static/* {
+    root * /srv/<APP_NAME>/staticfiles
+    file_server
+}
+```
+
+Serve static files directly. `handle_path` strips `/static` before file lookup, so test paths carefully.
+
+```caddyfile
+reverse_proxy 127.0.0.1:8000 {
+```
+
+Forward dynamic requests to private Gunicorn.
+
+```caddyfile
+header_up X-Forwarded-Proto {scheme}
+```
+
+Tell Django whether the original request was HTTP or HTTPS.
+
+## `templates/uvicorn.service`
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+```
+
+Start Uvicorn from the virtualenv, import Django's ASGI application, listen privately on localhost, use port 8001, and honor trusted proxy headers. Use this for ASGI/WebSocket deployments, not just because it is newer.
+
+## `templates/ci.yml`
+
+```yaml
+name: Django CI
+on:
+  push:
+  pull_request:
+```
+
+Name the workflow and run it on pushes and pull requests.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-python@v5
+```
+
+Download the repository and install the requested Python version on the GitHub runner.
+
+```yaml
+- run: python manage.py check
+- run: python manage.py test
+```
+
+Run Django checks and tests. These commands must pass before you trust the change.
+
+## `templates/db-backup.sh`
+
+```bash
+set -Eeuo pipefail
+```
+
+Stop the script when commands fail, unset variables are used, or pipelines fail.
+
+```bash
+install -d -m 700 "$BACKUP_DIR"
+```
+
+Create the backup directory with private permissions.
+
+```bash
+sudo -u postgres pg_dump --format=custom --no-owner --no-privileges --file="$FILE" "$DB_NAME"
+```
+
+Create a PostgreSQL custom-format backup file. Custom format is intended for `pg_restore`.
+
+```bash
+sudo -u postgres pg_restore --list "$FILE" > /dev/null
+```
+
+Verify that PostgreSQL can read the backup archive structure.
+
+## Development config versus production config
+
+Development config often optimizes for speed and convenience:
+
+| Development shortcut | Why it changes in production |
+|---|---|
+| `DEBUG=True` | exposes sensitive error details |
+| SQLite file in repo directory | weak fit for multi-user concurrent writes and backups |
+| `runserver` | not a production process manager |
+| localhost-only testing | does not test DNS, TLS, proxy headers, or firewall rules |
+| permissive CORS/hosts | weakens browser and host-header protections |
+| local console email backend | does not prove real delivery |
+| mounted source code in containers | not the same as immutable deployed images |
+
+A good development config is allowed to be convenient. The danger is copying that convenience into production without noticing what guarantee was lost.
+
 ## How to adapt a template safely
 
 Use this checklist every time you copy a template:
@@ -221,10 +416,11 @@ Use this checklist every time you copy a template:
 [ ] Replace every placeholder: <APP_NAME>, <DOMAIN>, <PROJECT_PACKAGE>, users, database names.
 [ ] Confirm file paths exist on the server.
 [ ] Confirm ownership and permissions match the service user.
-[ ] Test syntax: nginx -t, apache2ctl configtest, systemd daemon-reload.
+[ ] Test syntax: nginx -t, apache2ctl configtest, caddy validate, systemd daemon-reload.
 [ ] Start or reload the service.
 [ ] Read logs immediately after startup.
 [ ] Test the public URL and health check.
+[ ] Confirm static files, media files, admin, login, forms, and one critical user flow.
 ```
 
 If you cannot explain a line, leave a note and look it up before production use. Unknown config is operational debt.

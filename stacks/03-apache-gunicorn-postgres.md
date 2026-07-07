@@ -79,3 +79,92 @@ sudo systemctl status apache2
 sudo journalctl -u <APP_NAME> -n 100 --no-pager
 sudo tail -n 100 /var/log/apache2/<APP_NAME>-error.log
 ```
+
+## Walk through the Apache virtual host slowly
+
+```apache
+<VirtualHost *:80>
+```
+
+This begins an Apache virtual host that listens for HTTP traffic on port 80. The `*` means Apache can accept the request on any local IP address assigned to the server.
+
+```apache
+ServerName <DOMAIN>
+ServerAlias <WWW_DOMAIN>
+```
+
+`ServerName` is the primary hostname for this site. `ServerAlias` lists additional names that should use the same configuration. These should match DNS records, certificate names, and Django `ALLOWED_HOSTS`.
+
+```apache
+Alias /static/ /srv/<APP_NAME>/staticfiles/
+<Directory /srv/<APP_NAME>/staticfiles/>
+    Require all granted
+</Directory>
+```
+
+`Alias` maps the browser path `/static/` to a real filesystem directory. The matching `<Directory>` block gives Apache permission to serve files from that directory. Without `Require all granted`, Apache may know where the files are but still refuse access.
+
+```apache
+Alias /media/ /srv/<APP_NAME>/media/
+```
+
+This serves local user uploads. If media files are private, sensitive, or stored in object storage, do not expose this path blindly. Public media and private media need different designs.
+
+```apache
+ProxyPreserveHost On
+```
+
+This tells Apache to pass the original `Host` header to Gunicorn. Django needs the real host for `ALLOWED_HOSTS`, redirects, CSRF behavior, and absolute URL generation.
+
+```apache
+RequestHeader set X-Forwarded-Proto "http"
+```
+
+This sets a header that tells Django what protocol the browser used at the public edge. In the HTTP vhost it is `http`; in the HTTPS vhost it should be `https`.
+
+```apache
+ProxyPass /static/ !
+ProxyPass /media/ !
+```
+
+The exclamation mark means "do not proxy this path." Apache should serve static and media files itself instead of sending them to Gunicorn.
+
+```apache
+ProxyPass / http://127.0.0.1:8000/
+ProxyPassReverse / http://127.0.0.1:8000/
+```
+
+`ProxyPass` forwards dynamic requests to Gunicorn on the private loopback port. `ProxyPassReverse` rewrites certain upstream response headers, such as redirects, so the client sees the public site address rather than the private backend address.
+
+```apache
+ErrorLog ${APACHE_LOG_DIR}/<APP_NAME>-error.log
+CustomLog ${APACHE_LOG_DIR}/<APP_NAME>-access.log combined
+```
+
+These create per-site logs. Error logs help debug Apache/proxy/static issues. Access logs show request paths, status codes, client IPs, and timing depending on the log format.
+
+## Explain the Apache commands
+
+```bash
+sudo a2enmod proxy proxy_http headers ssl rewrite
+```
+
+`a2enmod` enables Apache modules. `proxy` and `proxy_http` support reverse proxying to Gunicorn. `headers` lets Apache set forwarded headers. `ssl` supports HTTPS. `rewrite` is commonly used by Certbot or redirect rules.
+
+```bash
+sudo a2ensite <APP_NAME>.conf
+```
+
+This enables the site by creating the right symlink from `sites-available` to `sites-enabled`.
+
+```bash
+sudo apache2ctl configtest
+```
+
+This checks Apache syntax before reload. Run it before every Apache reload.
+
+```bash
+sudo systemctl reload apache2
+```
+
+Reload asks Apache to reread configuration without a full stop/start when possible. If config syntax is broken, do not reload until it is fixed.

@@ -80,3 +80,73 @@ This is a conceptual starting point, not a copy-paste production answer. You mus
 ## When Compose is worth it
 
 Use it when repeatability and multi-service clarity help your team. Do not force Docker into a one-process hobby project purely for fashion; a well-managed systemd deployment can be simpler and safer for that case.
+
+## Walk through the Compose file
+
+```yaml
+services:
+```
+
+`services` is the top-level map of containers Compose should run. Each service gets a name, network identity, and configuration.
+
+```yaml
+web:
+  build: .
+```
+
+The `web` service is your Django app container. `build: .` tells Docker to build an image from the Dockerfile in the current directory.
+
+```yaml
+command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+```
+
+This is the process the web container runs. Inside a container, binding to `0.0.0.0` means "listen on all interfaces inside the container." It does not automatically publish the port to the public internet.
+
+```yaml
+env_file: .env
+```
+
+Compose loads environment variables from `.env`. Do not commit a real production `.env` file.
+
+```yaml
+depends_on:
+  db:
+    condition: service_healthy
+```
+
+This asks Compose to wait until the database health check passes before starting the web service. It helps startup order, but the application should still handle temporary database failures gracefully.
+
+```yaml
+expose:
+  - "8000"
+```
+
+`expose` documents and opens the port to other Compose services on the internal network. It is not the same as `ports`, which publishes a port to the host.
+
+```yaml
+volumes:
+  - postgres_data:/var/lib/postgresql/data
+```
+
+This stores PostgreSQL data in a named volume. Without persistent storage, deleting/recreating the database container can destroy data.
+
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U <DB_USER> -d <DB_NAME>"]
+```
+
+This tells Compose how to ask PostgreSQL whether it is ready to accept connections.
+
+```yaml
+ports:
+  - "80:80"
+  - "443:443"
+```
+
+The proxy publishes HTTP and HTTPS from the host to the container. Do not publish PostgreSQL or Redis this way for a normal public deployment.
+
+## Development Compose versus production Compose
+
+Development Compose often mounts source code into the container, enables reloaders, uses simple passwords, and exposes convenience ports. Production Compose should use built images, private networks, real secret handling, pinned versions, backups, logs, and controlled public ports.
+
+Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.

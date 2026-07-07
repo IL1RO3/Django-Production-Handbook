@@ -63,3 +63,71 @@ Or use a Unix socket after understanding socket ownership and Nginx permissions.
 - Start from a simple config and add advanced options only when measured behavior calls for them.
 
 Read the current uWSGI and Django integration documentation before using version-specific flags.
+
+## Walk through `uwsgi.ini`
+
+```ini
+[uwsgi]
+```
+
+This begins the uWSGI configuration section.
+
+```ini
+chdir = /srv/<APP_NAME>/app
+```
+
+Change into the Django project directory before loading the app. This makes relative imports and paths more predictable.
+
+```ini
+module = <PROJECT_PACKAGE>.wsgi:application
+```
+
+This is the Django WSGI object uWSGI imports. It has the same meaning as Gunicorn's `<PROJECT_PACKAGE>.wsgi:application`.
+
+```ini
+home = /srv/<APP_NAME>/venv
+```
+
+This points uWSGI at the Python virtual environment for dependencies.
+
+```ini
+master = true
+processes = 3
+threads = 2
+```
+
+`master` enables uWSGI's master process. `processes` and `threads` control concurrency. Start modestly because each process and thread has memory and database-connection impact.
+
+```ini
+socket = 127.0.0.1:8002
+```
+
+uWSGI listens privately on the loopback interface. Nginx connects to this address using the uWSGI protocol.
+
+```ini
+vacuum = true
+```
+
+Clean up sockets and temporary files when uWSGI exits.
+
+```ini
+need-app = true
+```
+
+Fail startup if the Python app cannot be loaded. This is safer than running a broken server that only fails when requests arrive.
+
+## Walk through the Nginx uWSGI location
+
+```nginx
+include uwsgi_params;
+```
+
+This loads standard parameters Nginx should pass to a uWSGI upstream, such as request method, path, query string, and server variables.
+
+```nginx
+uwsgi_pass 127.0.0.1:8002;
+```
+
+This forwards the request to the private uWSGI endpoint. Use `uwsgi_pass`, not `proxy_pass`, when speaking the uWSGI protocol.
+
+The confusing part is naming: uWSGI is both a server and a protocol. Nginx `uwsgi_pass` means it is using the protocol; it does not mean Nginx is running your Python app itself.

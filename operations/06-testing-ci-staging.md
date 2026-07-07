@@ -73,3 +73,63 @@ sign up → log in → create record → privileged publish/approve → public U
 ## Production smoke tests
 
 After each deploy, run a short, repeatable smoke check. It should be fast enough that you actually do it.
+
+## Walk through the GitHub Actions workflow
+
+```yaml
+name: Django CI
+```
+
+This is the human-readable workflow name shown in GitHub.
+
+```yaml
+on:
+  push:
+  pull_request:
+```
+
+Run the workflow when code is pushed and when a pull request is opened or updated.
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+```
+
+A workflow contains jobs. This job is named `test` and runs on a fresh Ubuntu runner hosted by GitHub.
+
+```yaml
+- uses: actions/checkout@v4
+```
+
+Download your repository into the runner.
+
+```yaml
+- uses: actions/setup-python@v5
+  with:
+    python-version: "3.12"
+```
+
+Install and select Python 3.12 for the job.
+
+```yaml
+- run: python -m pip install --upgrade pip
+- run: pip install -r requirements.txt
+```
+
+Upgrade pip and install project dependencies.
+
+```yaml
+- run: python manage.py check
+- run: python manage.py test
+```
+
+Run Django's configuration checks and test suite. If either command exits non-zero, the CI job fails.
+
+## Adding PostgreSQL to CI
+
+A real app often needs PostgreSQL in CI. That usually means adding a service container and test-only environment variables. Keep the CI database disposable. Never point CI at production PostgreSQL.
+
+## CI is not deployment by itself
+
+CI answers "does this revision pass automated checks?" Deployment answers "is this revision safely running on an environment?" A professional pipeline may combine them, but they are separate responsibilities.

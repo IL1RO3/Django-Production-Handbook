@@ -1956,6 +1956,95 @@ sudo journalctl -u <APP_NAME> -n 100 --no-pager
 sudo tail -n 100 /var/log/apache2/<APP_NAME>-error.log
 ```
 
+## Walk through the Apache virtual host slowly
+
+```apache
+<VirtualHost *:80>
+```
+
+This begins an Apache virtual host that listens for HTTP traffic on port 80. The `*` means Apache can accept the request on any local IP address assigned to the server.
+
+```apache
+ServerName <DOMAIN>
+ServerAlias <WWW_DOMAIN>
+```
+
+`ServerName` is the primary hostname for this site. `ServerAlias` lists additional names that should use the same configuration. These should match DNS records, certificate names, and Django `ALLOWED_HOSTS`.
+
+```apache
+Alias /static/ /srv/<APP_NAME>/staticfiles/
+<Directory /srv/<APP_NAME>/staticfiles/>
+    Require all granted
+</Directory>
+```
+
+`Alias` maps the browser path `/static/` to a real filesystem directory. The matching `<Directory>` block gives Apache permission to serve files from that directory. Without `Require all granted`, Apache may know where the files are but still refuse access.
+
+```apache
+Alias /media/ /srv/<APP_NAME>/media/
+```
+
+This serves local user uploads. If media files are private, sensitive, or stored in object storage, do not expose this path blindly. Public media and private media need different designs.
+
+```apache
+ProxyPreserveHost On
+```
+
+This tells Apache to pass the original `Host` header to Gunicorn. Django needs the real host for `ALLOWED_HOSTS`, redirects, CSRF behavior, and absolute URL generation.
+
+```apache
+RequestHeader set X-Forwarded-Proto "http"
+```
+
+This sets a header that tells Django what protocol the browser used at the public edge. In the HTTP vhost it is `http`; in the HTTPS vhost it should be `https`.
+
+```apache
+ProxyPass /static/ !
+ProxyPass /media/ !
+```
+
+The exclamation mark means "do not proxy this path." Apache should serve static and media files itself instead of sending them to Gunicorn.
+
+```apache
+ProxyPass / http://127.0.0.1:8000/
+ProxyPassReverse / http://127.0.0.1:8000/
+```
+
+`ProxyPass` forwards dynamic requests to Gunicorn on the private loopback port. `ProxyPassReverse` rewrites certain upstream response headers, such as redirects, so the client sees the public site address rather than the private backend address.
+
+```apache
+ErrorLog ${APACHE_LOG_DIR}/<APP_NAME>-error.log
+CustomLog ${APACHE_LOG_DIR}/<APP_NAME>-access.log combined
+```
+
+These create per-site logs. Error logs help debug Apache/proxy/static issues. Access logs show request paths, status codes, client IPs, and timing depending on the log format.
+
+## Explain the Apache commands
+
+```bash
+sudo a2enmod proxy proxy_http headers ssl rewrite
+```
+
+`a2enmod` enables Apache modules. `proxy` and `proxy_http` support reverse proxying to Gunicorn. `headers` lets Apache set forwarded headers. `ssl` supports HTTPS. `rewrite` is commonly used by Certbot or redirect rules.
+
+```bash
+sudo a2ensite <APP_NAME>.conf
+```
+
+This enables the site by creating the right symlink from `sites-available` to `sites-enabled`.
+
+```bash
+sudo apache2ctl configtest
+```
+
+This checks Apache syntax before reload. Run it before every Apache reload.
+
+```bash
+sudo systemctl reload apache2
+```
+
+Reload asks Apache to reread configuration without a full stop/start when possible. If config syntax is broken, do not reload until it is fixed.
+
 ---
 
 <!-- Source: stacks/04-apache-modwsgi.md -->
@@ -2029,6 +2118,65 @@ Use daemon mode so Django runs in its own managed Apache daemon group rather tha
 
 Do not treat mod_wsgi as automatically “more native” or Gunicorn as automatically “more modern.” Both are valid WSGI approaches. Pick the one your operational model can support confidently.
 
+## Walk through the mod_wsgi directives
+
+```apache
+WSGIDaemonProcess <APP_NAME> \
+    python-home=/srv/<APP_NAME>/venv \
+    python-path=/srv/<APP_NAME>/app \
+    processes=2 threads=15
+```
+
+This creates a named daemon process group for the Django app. `python-home` points to the virtual environment. `python-path` points to the Django project code. `processes=2` starts two daemon processes. `threads=15` allows each process to handle multiple threaded requests.
+
+More processes and threads are not automatically better. Each process uses memory, and threaded code must be safe with shared in-process state. Start modestly and measure.
+
+```apache
+WSGIProcessGroup <APP_NAME>
+```
+
+This tells Apache that requests for this virtual host should run in the daemon group created above, not in the generic Apache process pool.
+
+```apache
+WSGIScriptAlias / /srv/<APP_NAME>/app/<PROJECT_PACKAGE>/wsgi.py
+```
+
+This maps the URL root `/` to Django's WSGI entrypoint file. Apache imports that file through mod_wsgi and calls the WSGI application object inside it.
+
+```apache
+<Directory /srv/<APP_NAME>/app/<PROJECT_PACKAGE>>
+    <Files wsgi.py>
+        Require all granted
+    </Files>
+</Directory>
+```
+
+Apache needs explicit permission to access the WSGI file. This does not mean every project file becomes public; it allows Apache/mod_wsgi to load the entrypoint.
+
+## How environment variables work with mod_wsgi
+
+A Gunicorn systemd service usually reads `EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env`. With mod_wsgi, Apache is hosting Python, so environment handling is different. Common options are:
+
+- set variables in Apache config with `SetEnv`, then load them in `wsgi.py` when appropriate;
+- use a small environment-loading package in Django settings;
+- keep secrets in a root-owned file and load it carefully before Django settings need them.
+
+Do not assume the shell environment you see over SSH is visible to Apache. Service managers start processes with their own environment.
+
+## Debugging mod_wsgi startup
+
+If the app fails under mod_wsgi but works locally, check:
+
+1. Apache error log for Python traceback;
+2. Python version used by mod_wsgi;
+3. virtualenv path in `python-home`;
+4. project path in `python-path`;
+5. file permissions for Apache/mod_wsgi user;
+6. missing environment variables;
+7. imports that depend on the current working directory.
+
+mod_wsgi is reliable when configured correctly, but the Python/runtime coupling is stricter than the Gunicorn systemd model.
+
 ---
 
 <!-- Source: stacks/05-caddy-gunicorn.md -->
@@ -2086,6 +2234,75 @@ Caddy does not replace Django security settings, database backups, UFW, systemd,
 ## When not to choose Caddy
 
 Do not pick Caddy only because it has fewer lines of config if your team has established Apache/Nginx processes that are better understood and maintained. Operational familiarity is a real technical advantage.
+
+## Walk through the Caddyfile
+
+```caddyfile
+<DOMAIN>, <WWW_DOMAIN> {
+```
+
+This site block handles the listed hostnames. Caddy will try to obtain and renew HTTPS certificates for valid public names automatically.
+
+```caddyfile
+encode zstd gzip
+```
+
+This enables response compression when useful. Compression reduces bandwidth for text responses such as HTML, CSS, and JavaScript.
+
+```caddyfile
+handle_path /static/* {
+    root * /srv/<APP_NAME>/staticfiles
+    file_server
+}
+```
+
+`handle_path` matches `/static/*` and strips the matched prefix before looking on disk. `root` selects the filesystem directory. `file_server` tells Caddy to serve files directly.
+
+```caddyfile
+handle_path /media/* {
+    root * /srv/<APP_NAME>/media
+    file_server
+}
+```
+
+This serves local media files. Use this only when local public media is the intended design.
+
+```caddyfile
+reverse_proxy 127.0.0.1:8000 {
+```
+
+All other requests go to Gunicorn on the private local port. Caddy remains the public edge; Gunicorn remains private.
+
+```caddyfile
+header_up Host {host}
+header_up X-Real-IP {remote_host}
+header_up X-Forwarded-For {remote_host}
+header_up X-Forwarded-Proto {scheme}
+```
+
+These pass request context to Django. `{host}` is the browser-requested hostname. `{scheme}` is usually `https` after Caddy terminates TLS.
+
+## Caddy operational commands
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+Checks config syntax before reload.
+
+```bash
+sudo systemctl reload caddy
+```
+
+Reloads Caddy after a valid config change.
+
+```bash
+sudo journalctl -u caddy -n 100 --no-pager
+```
+
+Shows Caddy logs, including certificate and proxy errors.
+
+Caddy is concise, but you still need to understand the path behavior. Most Caddy static-file mistakes come from confusing `handle`, `handle_path`, `root`, and the URL prefix that remains after matching.
 
 ---
 
@@ -2159,6 +2376,59 @@ Real-time features may introduce Redis as a channel layer/cache/broker. Redis sh
 ## ASGI warning
 
 Async code changes failure modes. Test disconnect behavior, long-lived client load, proxy timeouts, worker restarts, and background task interactions. Do not assume an ASGI migration is a one-line server substitution.
+
+## Walk through the Uvicorn service
+
+```ini
+User=<APP_USER>
+Group=<APP_USER>
+```
+
+Run the ASGI server as the limited app user, not root.
+
+```ini
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+```
+
+The working directory points to the code checkout. The environment file supplies Django settings, database credentials, and secrets.
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+```
+
+This starts Uvicorn from the virtual environment, imports Django's ASGI application, listens only on localhost, uses port 8001, and allows trusted proxy headers. Keep the ASGI server private behind the reverse proxy.
+
+## Walk through the WebSocket proxy lines
+
+```nginx
+proxy_http_version 1.1;
+```
+
+WebSockets require HTTP/1.1 upgrade behavior. This line makes Nginx speak HTTP/1.1 to the upstream ASGI server.
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+These pass the browser's WebSocket upgrade request through the proxy. Without them, a WebSocket endpoint may work locally but fail through Nginx.
+
+## Timeouts and long-lived connections
+
+WebSockets can stay open for minutes or hours. That changes capacity planning:
+
+- each open connection consumes server resources;
+- proxy read timeouts may close idle sockets;
+- deploys must handle disconnect/reconnect behavior;
+- load balancers may need sticky behavior depending on the app design;
+- Redis/channel layers must stay private and monitored.
+
+Do not switch to ASGI only because it sounds newer. Use it when your application behavior needs it.
 
 ---
 
@@ -2246,6 +2516,76 @@ This is a conceptual starting point, not a copy-paste production answer. You mus
 ## When Compose is worth it
 
 Use it when repeatability and multi-service clarity help your team. Do not force Docker into a one-process hobby project purely for fashion; a well-managed systemd deployment can be simpler and safer for that case.
+
+## Walk through the Compose file
+
+```yaml
+services:
+```
+
+`services` is the top-level map of containers Compose should run. Each service gets a name, network identity, and configuration.
+
+```yaml
+web:
+  build: .
+```
+
+The `web` service is your Django app container. `build: .` tells Docker to build an image from the Dockerfile in the current directory.
+
+```yaml
+command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+```
+
+This is the process the web container runs. Inside a container, binding to `0.0.0.0` means "listen on all interfaces inside the container." It does not automatically publish the port to the public internet.
+
+```yaml
+env_file: .env
+```
+
+Compose loads environment variables from `.env`. Do not commit a real production `.env` file.
+
+```yaml
+depends_on:
+  db:
+    condition: service_healthy
+```
+
+This asks Compose to wait until the database health check passes before starting the web service. It helps startup order, but the application should still handle temporary database failures gracefully.
+
+```yaml
+expose:
+  - "8000"
+```
+
+`expose` documents and opens the port to other Compose services on the internal network. It is not the same as `ports`, which publishes a port to the host.
+
+```yaml
+volumes:
+  - postgres_data:/var/lib/postgresql/data
+```
+
+This stores PostgreSQL data in a named volume. Without persistent storage, deleting/recreating the database container can destroy data.
+
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U <DB_USER> -d <DB_NAME>"]
+```
+
+This tells Compose how to ask PostgreSQL whether it is ready to accept connections.
+
+```yaml
+ports:
+  - "80:80"
+  - "443:443"
+```
+
+The proxy publishes HTTP and HTTPS from the host to the container. Do not publish PostgreSQL or Redis this way for a normal public deployment.
+
+## Development Compose versus production Compose
+
+Development Compose often mounts source code into the container, enables reloaders, uses simple passwords, and exposes convenience ports. Production Compose should use built images, private networks, real secret handling, pinned versions, backups, logs, and controlled public ports.
+
+Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.
 
 ---
 
@@ -2369,6 +2709,74 @@ Or use a Unix socket after understanding socket ownership and Nginx permissions.
 - Start from a simple config and add advanced options only when measured behavior calls for them.
 
 Read the current uWSGI and Django integration documentation before using version-specific flags.
+
+## Walk through `uwsgi.ini`
+
+```ini
+[uwsgi]
+```
+
+This begins the uWSGI configuration section.
+
+```ini
+chdir = /srv/<APP_NAME>/app
+```
+
+Change into the Django project directory before loading the app. This makes relative imports and paths more predictable.
+
+```ini
+module = <PROJECT_PACKAGE>.wsgi:application
+```
+
+This is the Django WSGI object uWSGI imports. It has the same meaning as Gunicorn's `<PROJECT_PACKAGE>.wsgi:application`.
+
+```ini
+home = /srv/<APP_NAME>/venv
+```
+
+This points uWSGI at the Python virtual environment for dependencies.
+
+```ini
+master = true
+processes = 3
+threads = 2
+```
+
+`master` enables uWSGI's master process. `processes` and `threads` control concurrency. Start modestly because each process and thread has memory and database-connection impact.
+
+```ini
+socket = 127.0.0.1:8002
+```
+
+uWSGI listens privately on the loopback interface. Nginx connects to this address using the uWSGI protocol.
+
+```ini
+vacuum = true
+```
+
+Clean up sockets and temporary files when uWSGI exits.
+
+```ini
+need-app = true
+```
+
+Fail startup if the Python app cannot be loaded. This is safer than running a broken server that only fails when requests arrive.
+
+## Walk through the Nginx uWSGI location
+
+```nginx
+include uwsgi_params;
+```
+
+This loads standard parameters Nginx should pass to a uWSGI upstream, such as request method, path, query string, and server variables.
+
+```nginx
+uwsgi_pass 127.0.0.1:8002;
+```
+
+This forwards the request to the private uWSGI endpoint. Use `uwsgi_pass`, not `proxy_pass`, when speaking the uWSGI protocol.
+
+The confusing part is naming: uWSGI is both a server and a protocol. Nginx `uwsgi_pass` means it is using the protocol; it does not mean Nginx is running your Python app itself.
 
 ---
 
@@ -2590,6 +2998,59 @@ Apply regular OS/package updates. Before large upgrades, have a backup and maint
 - logs are reviewed, not ignored;
 - backups are off-host;
 - file uploads are treated as untrusted input and never executed as server-side code.
+
+## Explain the UFW commands
+
+```bash
+sudo ufw allow OpenSSH
+```
+
+Allow the firewall profile for SSH before enabling UFW. This reduces the chance of locking yourself out.
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+Allow public HTTP and HTTPS. Port 80 is used for redirects and common certificate validation. Port 443 is normal HTTPS application traffic.
+
+```bash
+sudo ufw default deny incoming
+```
+
+Reject inbound connections unless a rule explicitly allows them.
+
+```bash
+sudo ufw default allow outgoing
+```
+
+Allow the server to initiate outbound connections, such as package downloads, API calls, DNS, and email provider connections.
+
+```bash
+sudo ufw enable
+```
+
+Turn on UFW. Do this only after SSH is allowed and you have a recovery path.
+
+```bash
+sudo ufw status numbered
+```
+
+Show active rules with numbers. Numbered output is useful when deleting a mistaken rule.
+
+## Explain the Fail2Ban jail
+
+```ini
+[sshd]
+enabled = true
+maxretry = 5
+findtime = 10m
+bantime = 1h
+```
+
+`[sshd]` configures the SSH jail. `enabled = true` turns it on. `maxretry = 5` means five failures trigger a ban. `findtime = 10m` means those failures must occur within ten minutes. `bantime = 1h` means the ban lasts one hour.
+
+Fail2Ban should reduce noisy brute-force attempts, but it is not your primary security model. SSH keys, patched software, least privilege, and restricted exposed ports matter more.
 
 ---
 
@@ -3114,6 +3575,66 @@ sign up → log in → create record → privileged publish/approve → public U
 ## Production smoke tests
 
 After each deploy, run a short, repeatable smoke check. It should be fast enough that you actually do it.
+
+## Walk through the GitHub Actions workflow
+
+```yaml
+name: Django CI
+```
+
+This is the human-readable workflow name shown in GitHub.
+
+```yaml
+on:
+  push:
+  pull_request:
+```
+
+Run the workflow when code is pushed and when a pull request is opened or updated.
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+```
+
+A workflow contains jobs. This job is named `test` and runs on a fresh Ubuntu runner hosted by GitHub.
+
+```yaml
+- uses: actions/checkout@v4
+```
+
+Download your repository into the runner.
+
+```yaml
+- uses: actions/setup-python@v5
+  with:
+    python-version: "3.12"
+```
+
+Install and select Python 3.12 for the job.
+
+```yaml
+- run: python -m pip install --upgrade pip
+- run: pip install -r requirements.txt
+```
+
+Upgrade pip and install project dependencies.
+
+```yaml
+- run: python manage.py check
+- run: python manage.py test
+```
+
+Run Django's configuration checks and test suite. If either command exits non-zero, the CI job fails.
+
+## Adding PostgreSQL to CI
+
+A real app often needs PostgreSQL in CI. That usually means adding a service container and test-only environment variables. Keep the CI database disposable. Never point CI at production PostgreSQL.
+
+## CI is not deployment by itself
+
+CI answers "does this revision pass automated checks?" Deployment answers "is this revision safely running on an environment?" A professional pipeline may combine them, but they are separate responsibilities.
 
 ---
 
@@ -3900,6 +4421,201 @@ Persistent=true
 
 This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
 
+## `templates/apache-gunicorn.conf`
+
+```apache
+<VirtualHost *:80>
+```
+
+This starts an Apache site that accepts HTTP requests on port 80.
+
+```apache
+ServerName <DOMAIN>
+ServerAlias <WWW_DOMAIN>
+```
+
+These hostnames decide which requests belong to this site. They should match DNS, TLS certificate names, and Django `ALLOWED_HOSTS`.
+
+```apache
+Alias /static/ /srv/<APP_NAME>/staticfiles/
+<Directory /srv/<APP_NAME>/staticfiles/>
+    Require all granted
+</Directory>
+```
+
+`Alias` maps the URL path to a directory. The `<Directory>` block permits Apache to serve that directory. Apache needs both the mapping and the permission.
+
+```apache
+ProxyPreserveHost On
+```
+
+Pass the browser's original hostname through to Django instead of replacing it with `127.0.0.1:8000`.
+
+```apache
+RequestHeader set X-Forwarded-Proto "http"
+```
+
+Tell Django the original public scheme. In the HTTPS vhost this should become `https`.
+
+```apache
+ProxyPass /static/ !
+ProxyPass /media/ !
+```
+
+Exclude static and media paths from proxying. Apache serves those files directly.
+
+```apache
+ProxyPass / http://127.0.0.1:8000/
+ProxyPassReverse / http://127.0.0.1:8000/
+```
+
+Forward dynamic requests to private Gunicorn and rewrite upstream redirect headers back into public-facing URLs.
+
+## `templates/apache-modwsgi.conf`
+
+```apache
+WSGIDaemonProcess <APP_NAME> \
+    python-home=/srv/<APP_NAME>/venv \
+    python-path=/srv/<APP_NAME>/app \
+    processes=2 threads=15
+```
+
+Create a mod_wsgi daemon group for the Django app. `python-home` points to the virtualenv. `python-path` points to the project source. `processes` and `threads` control concurrency.
+
+```apache
+WSGIProcessGroup <APP_NAME>
+```
+
+Use that daemon group for this virtual host.
+
+```apache
+WSGIScriptAlias / /srv/<APP_NAME>/app/<PROJECT_PACKAGE>/wsgi.py
+```
+
+Map the entire site to Django's WSGI entrypoint file.
+
+```apache
+<Files wsgi.py>
+    Require all granted
+</Files>
+```
+
+Allow Apache to load the WSGI entrypoint. This is not a permission to expose all source files as downloads.
+
+## `templates/Caddyfile`
+
+```caddyfile
+<DOMAIN>, <WWW_DOMAIN> {
+```
+
+Define the hostnames for this site. Caddy uses these names for automatic HTTPS when DNS points to the server.
+
+```caddyfile
+encode zstd gzip
+```
+
+Enable compression for suitable responses.
+
+```caddyfile
+handle_path /static/* {
+    root * /srv/<APP_NAME>/staticfiles
+    file_server
+}
+```
+
+Serve static files directly. `handle_path` strips `/static` before file lookup, so test paths carefully.
+
+```caddyfile
+reverse_proxy 127.0.0.1:8000 {
+```
+
+Forward dynamic requests to private Gunicorn.
+
+```caddyfile
+header_up X-Forwarded-Proto {scheme}
+```
+
+Tell Django whether the original request was HTTP or HTTPS.
+
+## `templates/uvicorn.service`
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+```
+
+Start Uvicorn from the virtualenv, import Django's ASGI application, listen privately on localhost, use port 8001, and honor trusted proxy headers. Use this for ASGI/WebSocket deployments, not just because it is newer.
+
+## `templates/ci.yml`
+
+```yaml
+name: Django CI
+on:
+  push:
+  pull_request:
+```
+
+Name the workflow and run it on pushes and pull requests.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-python@v5
+```
+
+Download the repository and install the requested Python version on the GitHub runner.
+
+```yaml
+- run: python manage.py check
+- run: python manage.py test
+```
+
+Run Django checks and tests. These commands must pass before you trust the change.
+
+## `templates/db-backup.sh`
+
+```bash
+set -Eeuo pipefail
+```
+
+Stop the script when commands fail, unset variables are used, or pipelines fail.
+
+```bash
+install -d -m 700 "$BACKUP_DIR"
+```
+
+Create the backup directory with private permissions.
+
+```bash
+sudo -u postgres pg_dump --format=custom --no-owner --no-privileges --file="$FILE" "$DB_NAME"
+```
+
+Create a PostgreSQL custom-format backup file. Custom format is intended for `pg_restore`.
+
+```bash
+sudo -u postgres pg_restore --list "$FILE" > /dev/null
+```
+
+Verify that PostgreSQL can read the backup archive structure.
+
+## Development config versus production config
+
+Development config often optimizes for speed and convenience:
+
+| Development shortcut | Why it changes in production |
+|---|---|
+| `DEBUG=True` | exposes sensitive error details |
+| SQLite file in repo directory | weak fit for multi-user concurrent writes and backups |
+| `runserver` | not a production process manager |
+| localhost-only testing | does not test DNS, TLS, proxy headers, or firewall rules |
+| permissive CORS/hosts | weakens browser and host-header protections |
+| local console email backend | does not prove real delivery |
+| mounted source code in containers | not the same as immutable deployed images |
+
+A good development config is allowed to be convenient. The danger is copying that convenience into production without noticing what guarantee was lost.
+
 ## How to adapt a template safely
 
 Use this checklist every time you copy a template:
@@ -3908,10 +4624,11 @@ Use this checklist every time you copy a template:
 [ ] Replace every placeholder: <APP_NAME>, <DOMAIN>, <PROJECT_PACKAGE>, users, database names.
 [ ] Confirm file paths exist on the server.
 [ ] Confirm ownership and permissions match the service user.
-[ ] Test syntax: nginx -t, apache2ctl configtest, systemd daemon-reload.
+[ ] Test syntax: nginx -t, apache2ctl configtest, caddy validate, systemd daemon-reload.
 [ ] Start or reload the service.
 [ ] Read logs immediately after startup.
 [ ] Test the public URL and health check.
+[ ] Confirm static files, media files, admin, login, forms, and one critical user flow.
 ```
 
 If you cannot explain a line, leave a note and look it up before production use. Unknown config is operational debt.

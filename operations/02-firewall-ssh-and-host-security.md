@@ -72,3 +72,56 @@ Apply regular OS/package updates. Before large upgrades, have a backup and maint
 - logs are reviewed, not ignored;
 - backups are off-host;
 - file uploads are treated as untrusted input and never executed as server-side code.
+
+## Explain the UFW commands
+
+```bash
+sudo ufw allow OpenSSH
+```
+
+Allow the firewall profile for SSH before enabling UFW. This reduces the chance of locking yourself out.
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+Allow public HTTP and HTTPS. Port 80 is used for redirects and common certificate validation. Port 443 is normal HTTPS application traffic.
+
+```bash
+sudo ufw default deny incoming
+```
+
+Reject inbound connections unless a rule explicitly allows them.
+
+```bash
+sudo ufw default allow outgoing
+```
+
+Allow the server to initiate outbound connections, such as package downloads, API calls, DNS, and email provider connections.
+
+```bash
+sudo ufw enable
+```
+
+Turn on UFW. Do this only after SSH is allowed and you have a recovery path.
+
+```bash
+sudo ufw status numbered
+```
+
+Show active rules with numbers. Numbered output is useful when deleting a mistaken rule.
+
+## Explain the Fail2Ban jail
+
+```ini
+[sshd]
+enabled = true
+maxretry = 5
+findtime = 10m
+bantime = 1h
+```
+
+`[sshd]` configures the SSH jail. `enabled = true` turns it on. `maxretry = 5` means five failures trigger a ban. `findtime = 10m` means those failures must occur within ten minutes. `bantime = 1h` means the ban lasts one hour.
+
+Fail2Ban should reduce noisy brute-force attempts, but it is not your primary security model. SSH keys, patched software, least privilege, and restricted exposed ports matter more.

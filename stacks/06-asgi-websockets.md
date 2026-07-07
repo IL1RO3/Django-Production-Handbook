@@ -66,3 +66,56 @@ Real-time features may introduce Redis as a channel layer/cache/broker. Redis sh
 ## ASGI warning
 
 Async code changes failure modes. Test disconnect behavior, long-lived client load, proxy timeouts, worker restarts, and background task interactions. Do not assume an ASGI migration is a one-line server substitution.
+
+## Walk through the Uvicorn service
+
+```ini
+User=<APP_USER>
+Group=<APP_USER>
+```
+
+Run the ASGI server as the limited app user, not root.
+
+```ini
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+```
+
+The working directory points to the code checkout. The environment file supplies Django settings, database credentials, and secrets.
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+```
+
+This starts Uvicorn from the virtual environment, imports Django's ASGI application, listens only on localhost, uses port 8001, and allows trusted proxy headers. Keep the ASGI server private behind the reverse proxy.
+
+## Walk through the WebSocket proxy lines
+
+```nginx
+proxy_http_version 1.1;
+```
+
+WebSockets require HTTP/1.1 upgrade behavior. This line makes Nginx speak HTTP/1.1 to the upstream ASGI server.
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+These pass the browser's WebSocket upgrade request through the proxy. Without them, a WebSocket endpoint may work locally but fail through Nginx.
+
+## Timeouts and long-lived connections
+
+WebSockets can stay open for minutes or hours. That changes capacity planning:
+
+- each open connection consumes server resources;
+- proxy read timeouts may close idle sockets;
+- deploys must handle disconnect/reconnect behavior;
+- load balancers may need sticky behavior depending on the app design;
+- Redis/channel layers must stay private and monitored.
+
+Do not switch to ASGI only because it sounds newer. Use it when your application behavior needs it.
