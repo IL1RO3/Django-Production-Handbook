@@ -1690,6 +1690,31 @@ That is why this guide binds Gunicorn to loopback:
 
 Only processes on the same server can reach that address. The public internet reaches Nginx/Apache/Caddy on ports 80 and 443, and the proxy reaches Gunicorn privately.
 
+## Common Gunicorn failure modes
+
+| Symptom | Likely cause | First place to look |
+|---|---|---|
+| service fails immediately | wrong module path, missing dependency, missing env var | `journalctl -u <APP_NAME>` |
+| `Address already in use` | another service is bound to the same port | `sudo ss -ltnp` |
+| requests hang | worker exhaustion, slow DB/API call, deadlock | Gunicorn logs, Django logs, DB activity |
+| frequent worker timeouts | slow view, slow query, external API wait, too few workers | app traces and request logs |
+| high memory usage | too many workers, memory leak, large in-process data | `systemctl status`, metrics, process list |
+
+Do not tune Gunicorn by copying random worker counts. First identify whether the bottleneck is CPU, memory, database, network, or application code.
+
+## Development versus production Gunicorn
+
+During development, Django's `runserver` reloads code and prints friendly tracebacks. Gunicorn does not exist to make local development nicer; it exists to run stable worker processes in production. In production:
+
+- code changes require a restart or reload;
+- logs go to systemd or a configured log path;
+- secrets come from the service environment;
+- the process runs as a limited user;
+- the bind address is private;
+- a reverse proxy handles public HTTP/TLS.
+
+That difference is intentional. Production values repeatability and control over convenience.
+
 ---
 
 <!-- Source: stacks/02-nginx-gunicorn-postgres.md -->
@@ -1870,6 +1895,51 @@ Use this order:
 
 This order prevents guessing. A 502 is different from DNS failure, and both are different from a Django 500.
 
+## What Nginx is responsible for in this stack
+
+Nginx is the public HTTP edge. It should handle:
+
+- listening on ports 80 and 443;
+- redirecting HTTP to HTTPS after certificates work;
+- serving static files from `STATIC_ROOT`;
+- serving public media if local media is the chosen design;
+- forwarding dynamic requests to Gunicorn;
+- setting proxy headers for Django;
+- writing access/error logs;
+- buffering slow clients so Python workers are not tied up unnecessarily.
+
+Nginx should not run Django code, connect directly to PostgreSQL, or store application secrets.
+
+## Request path with failure points
+
+```text
+browser
+  -> DNS resolves domain
+  -> provider firewall allows 80/443
+  -> UFW allows 80/443
+  -> Nginx chooses server block by server_name
+  -> /static/ and /media/ may be served from disk
+  -> other paths proxy to 127.0.0.1:8000
+  -> Gunicorn sends request into Django
+  -> Django talks to PostgreSQL
+```
+
+When something breaks, locate the failed arrow. If DNS is wrong, Django settings cannot fix it. If Gunicorn is stopped, changing Nginx `server_name` cannot fix it.
+
+## Static files in this stack
+
+`collectstatic` copies static files into `STATIC_ROOT`. Nginx then serves that directory. The flow is:
+
+```text
+Django app static sources
+  -> manage.py collectstatic
+  -> /srv/<APP_NAME>/staticfiles
+  -> Nginx alias /static/
+  -> browser downloads CSS/JS/images
+```
+
+If the admin has no CSS, check `collectstatic`, `STATIC_ROOT`, the Nginx `alias`, and filesystem permissions.
+
 ---
 
 <!-- Source: stacks/03-apache-gunicorn-postgres.md -->
@@ -2045,6 +2115,39 @@ sudo systemctl reload apache2
 
 Reload asks Apache to reread configuration without a full stop/start when possible. If config syntax is broken, do not reload until it is fixed.
 
+## What Apache is responsible for in this stack
+
+Apache plays the same public-edge role that Nginx plays in the reference stack. It should handle HTTP/TLS, static files, public media if applicable, proxying to Gunicorn, request headers, and access/error logs.
+
+Gunicorn still owns Python worker management. PostgreSQL still owns durable relational data. Keeping those responsibilities separate makes debugging easier.
+
+## Apache request path
+
+```text
+browser
+  -> Apache virtual host selected by ServerName/ServerAlias
+  -> Alias serves /static/ or /media/ from disk
+  -> ProxyPass sends dynamic requests to Gunicorn
+  -> Gunicorn runs Django WSGI app
+  -> Django queries PostgreSQL
+```
+
+If Apache returns a 404 for a static file, inspect Apache `Alias` and filesystem paths. If Apache returns 502/503, inspect the Gunicorn service. If Django returns 500, inspect the app journal and Django traceback.
+
+## Apache module mental model
+
+Apache features are often modules. The config only works when the required modules are enabled:
+
+| Module | Why this stack needs it |
+|---|---|
+| `proxy` | base proxy capability |
+| `proxy_http` | proxy HTTP requests to Gunicorn |
+| `headers` | set `X-Forwarded-Proto` and similar headers |
+| `ssl` | serve HTTPS |
+| `rewrite` | redirects and Certbot-managed rules |
+
+If Apache says a directive is invalid, the module that provides that directive may not be enabled.
+
 ---
 
 <!-- Source: stacks/04-apache-modwsgi.md -->
@@ -2177,6 +2280,50 @@ If the app fails under mod_wsgi but works locally, check:
 
 mod_wsgi is reliable when configured correctly, but the Python/runtime coupling is stricter than the Gunicorn systemd model.
 
+## Full mod_wsgi request lifecycle
+
+```text
+browser
+  -> Apache virtual host
+  -> Apache serves /static/ directly when matched
+  -> mod_wsgi daemon process imports wsgi.py
+  -> Django handles dynamic request
+  -> Django queries PostgreSQL
+  -> response returns through Apache
+```
+
+There is no Gunicorn service in this stack. That means there is also no Gunicorn journal. Python errors usually appear in Apache's error log.
+
+## What `daemon mode` means
+
+mod_wsgi can run apps in embedded mode or daemon mode. Daemon mode creates a separate process group for the application. This is preferred for Django because it gives you clearer process isolation, easier virtualenv configuration, and more predictable restarts than mixing the app into generic Apache workers.
+
+## mod_wsgi environment example
+
+One common pattern is to adjust `wsgi.py` so it loads environment before Django settings are imported. The exact method depends on your secret-management choice, but the order matters:
+
+```python
+import os
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "<PROJECT_PACKAGE>.settings")
+
+from django.core.wsgi import get_wsgi_application
+application = get_wsgi_application()
+```
+
+By the time `get_wsgi_application()` runs, Django settings must be able to read all required variables. If `SECRET_KEY` or database variables are missing, startup fails.
+
+## When mod_wsgi is the wrong choice
+
+Avoid mod_wsgi when:
+
+- you do not control the Python/mod_wsgi version compatibility;
+- your team is more comfortable with systemd service logs than Apache-hosted Python logs;
+- you need ASGI/WebSockets;
+- you want the simplest beginner path on a clean VPS.
+
+It is a valid production stack, but it is less forgiving for beginners than Apache/Nginx proxying to Gunicorn.
+
 ---
 
 <!-- Source: stacks/05-caddy-gunicorn.md -->
@@ -2304,6 +2451,50 @@ Shows Caddy logs, including certificate and proxy errors.
 
 Caddy is concise, but you still need to understand the path behavior. Most Caddy static-file mistakes come from confusing `handle`, `handle_path`, `root`, and the URL prefix that remains after matching.
 
+## Caddy request path
+
+```text
+browser
+  -> Caddy site block selected by hostname
+  -> automatic TLS certificate is used when available
+  -> /static/* and /media/* may be served from disk
+  -> reverse_proxy sends dynamic requests to Gunicorn
+  -> Gunicorn runs Django
+  -> Django talks to PostgreSQL
+```
+
+Caddy hides some TLS complexity, but the architecture is still the same: public proxy in front, private Python app server behind it.
+
+## Automatic HTTPS does not remove verification
+
+Caddy can issue and renew certificates automatically, but it still depends on:
+
+- DNS pointing to the server;
+- ports 80 and 443 being reachable;
+- Caddy being able to write its certificate storage;
+- no conflicting service already bound to 80/443;
+- correct hostnames in the Caddyfile.
+
+If certificate issuance fails, read `journalctl -u caddy`; do not assume Django is involved.
+
+## `handle` versus `handle_path`
+
+`handle_path /static/*` strips the matched `/static` prefix before file lookup. Plain `handle /static/*` does not strip it. This distinction is a common source of confusing 404s.
+
+If your disk has:
+
+```text
+/srv/example/staticfiles/admin/css/base.css
+```
+
+and the browser requests:
+
+```text
+/static/admin/css/base.css
+```
+
+`handle_path /static/*` with `root * /srv/example/staticfiles` can find `admin/css/base.css` under that root. Test this before launch.
+
 ---
 
 <!-- Source: stacks/06-asgi-websockets.md -->
@@ -2429,6 +2620,42 @@ WebSockets can stay open for minutes or hours. That changes capacity planning:
 - Redis/channel layers must stay private and monitored.
 
 Do not switch to ASGI only because it sounds newer. Use it when your application behavior needs it.
+
+## WSGI versus ASGI in plain language
+
+WSGI is the traditional synchronous Python web interface. It is excellent for normal request/response Django pages.
+
+ASGI supports both normal HTTP and long-lived async protocols such as WebSockets. Use ASGI when the application needs behavior like live chat, notifications, collaborative editing, streaming, or Django Channels consumers.
+
+```text
+WSGI: request comes in -> response goes out -> connection is done
+ASGI: connection may stay open -> app may send/receive events over time
+```
+
+## Django ASGI entrypoint
+
+A Django project usually has both files:
+
+```text
+<PROJECT_PACKAGE>/wsgi.py
+<PROJECT_PACKAGE>/asgi.py
+```
+
+Gunicorn imports `wsgi.py`. Uvicorn/Daphne/Hypercorn import `asgi.py`. If you point Uvicorn at `.wsgi:application`, you are not using the intended ASGI entrypoint.
+
+## Channels and Redis mental model
+
+For WebSocket features across multiple workers or servers, Django Channels commonly uses Redis as a channel layer:
+
+```text
+browser WebSocket
+  -> proxy
+  -> ASGI worker
+  -> channel layer Redis
+  -> another worker/consumer may receive event
+```
+
+Redis should be private. If Redis is only used as a channel layer/cache, its backup requirements may differ from PostgreSQL. If you store critical durable data in Redis, your operational requirements change.
 
 ---
 
@@ -2587,6 +2814,44 @@ Development Compose often mounts source code into the container, enables reloade
 
 Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.
 
+## Compose networking mental model
+
+Compose creates a private network for services. Services can reach each other by service name:
+
+```text
+web container -> db:5432
+proxy container -> web:8000
+```
+
+Inside Compose, `db` is a DNS name. From your laptop or the public internet, `db` is not automatically reachable. Public access happens only through published `ports`.
+
+## Image, container, volume: do not mix them up
+
+| Thing | Meaning |
+|---|---|
+| image | built package/template for a container |
+| container | running instance of an image |
+| volume | persistent storage managed outside the container filesystem |
+| bind mount | host path mounted into a container |
+| network | private communication space between containers |
+
+Deleting a container should not delete PostgreSQL data if the data lives in a named volume. Deleting the volume can delete the database.
+
+## Production questions before choosing Compose
+
+Before using Compose on a server, answer:
+
+- Where are images built: server, CI, registry?
+- How are secrets provided without committing `.env`?
+- How does `collectstatic` run and where do static files land?
+- Where do media files persist?
+- How are database backups created and copied off-host?
+- How are containers restarted after reboot?
+- How are logs collected and rotated?
+- How are image updates tested and rolled back?
+
+Compose can be clean and practical, but it does not answer those questions for you.
+
 ---
 
 <!-- Source: stacks/08-managed-and-kubernetes.md -->
@@ -2639,6 +2904,91 @@ single VPS + systemd
 ```
 
 The best architecture is the smallest one that reliably meets present requirements and can be evolved without losing data or operational clarity.
+
+## PaaS deployment mental model
+
+A typical PaaS flow looks like this:
+
+```text
+git push or container image
+  -> platform builds/release artifact
+  -> platform starts web process
+  -> platform routes HTTPS traffic
+  -> app connects to managed database/add-ons
+```
+
+The platform may hide Linux users, systemd, Nginx, and certificate files. It does not hide Django production concerns. You still configure `DEBUG=False`, `ALLOWED_HOSTS`, database URLs, static files, migrations, secrets, health checks, logs, and rollback.
+
+## Common PaaS config concepts
+
+| Concept | Meaning |
+|---|---|
+| build command | installs dependencies and prepares assets |
+| start command | runs Gunicorn/Uvicorn or another app server |
+| environment variables | deployment-specific config/secrets |
+| release phase/job | runs migrations or setup commands during release |
+| dyno/instance | running process/container managed by the platform |
+| add-on | managed database/cache/email/logging service |
+| health check | endpoint the platform uses to decide whether the app is alive |
+
+A PaaS is often the fastest way to get a correct public app, but read its limits: request timeout, filesystem persistence, background workers, cron/scheduler support, database connection caps, and billing behavior.
+
+## Serverless Django concerns
+
+Serverless is not just "Django but cheaper." Watch for:
+
+- cold starts after idle periods;
+- read-only or temporary filesystems;
+- short execution time limits;
+- database connection storms from many function instances;
+- difficulty running migrations safely;
+- background jobs and scheduled tasks needing separate services;
+- WebSocket support depending on provider architecture.
+
+Use serverless when its constraints match the app. Do not force a traditional Django monolith into it without testing the operational model.
+
+## Kubernetes objects in a Django deployment
+
+A simplified Kubernetes Django setup may include:
+
+```text
+Ingress/Gateway
+  -> Service
+  -> Deployment with Django pods
+  -> Secret for env vars
+  -> ConfigMap for non-secret config
+  -> Job for migrations
+  -> managed PostgreSQL outside cluster
+  -> object storage for media
+```
+
+For most teams, PostgreSQL should be managed outside the cluster unless the team has real database operations experience on Kubernetes.
+
+## Kubernetes beginner translation
+
+| Kubernetes term | Rough beginner translation |
+|---|---|
+| Pod | one running copy of one or more containers |
+| Deployment | rule saying how many pod copies should exist and how to update them |
+| Service | stable internal address for a set of pods |
+| Ingress | public HTTP routing into services |
+| ConfigMap | non-secret settings file/key-value store |
+| Secret | secret-like key-value store, still requiring careful access control |
+| Job | run-to-completion task such as migrations |
+| HPA | autoscaler that changes replica count from metrics |
+
+## Kubernetes failure modes beginners underestimate
+
+- migrations running more than once or at the wrong time;
+- pods restarting because readiness/liveness probes are wrong;
+- app replicas sharing no media storage;
+- database connection count exploding as replicas scale;
+- secrets existing in too many namespaces or CI logs;
+- ingress/proxy headers not matching Django HTTPS settings;
+- logs disappearing because no central log collection exists;
+- YAML applying successfully while the app is still broken.
+
+Kubernetes is powerful, but it moves complexity from one server into a platform. Use it when you are ready to operate the platform too.
 
 ---
 
@@ -2778,6 +3128,36 @@ This forwards the request to the private uWSGI endpoint. Use `uwsgi_pass`, not `
 
 The confusing part is naming: uWSGI is both a server and a protocol. Nginx `uwsgi_pass` means it is using the protocol; it does not mean Nginx is running your Python app itself.
 
+## uWSGI request lifecycle
+
+```text
+browser
+  -> Nginx receives HTTPS request
+  -> Nginx serves static files directly when matched
+  -> Nginx sends dynamic request with uwsgi protocol
+  -> uWSGI imports Django WSGI application
+  -> Django handles request
+  -> PostgreSQL stores/loads data
+```
+
+The main difference from Gunicorn is the Nginx-to-app protocol and uWSGI's configuration model. Gunicorn usually receives HTTP from the proxy. uWSGI often receives the uWSGI protocol through `uwsgi_pass`.
+
+## uWSGI operational cautions
+
+uWSGI has many options because it is broad and mature. That flexibility is useful for experienced operators and confusing for beginners. Add options only when you know what behavior they change.
+
+Common mistakes:
+
+| Mistake | Result |
+|---|---|
+| using `proxy_pass` instead of `uwsgi_pass` | Nginx speaks the wrong protocol |
+| wrong `module` path | app fails to load |
+| wrong virtualenv in `home` | missing package/import errors |
+| public uWSGI socket | app server exposed without HTTP edge protections |
+| too many processes/threads | memory or DB connection pressure |
+
+If you already know Gunicorn, choose uWSGI only for a specific operational reason.
+
 ---
 
 <!-- Source: stacks/10-other-valid-options.md -->
@@ -2821,6 +3201,77 @@ Cloud providers often offer managed HTTP/TLS load balancers. These can terminate
 ## The selection rule
 
 A technology is not better because it has more features. Prefer the smallest toolset that your team can correctly configure, monitor, patch, back up, and recover.
+
+## Nginx Unit mental model
+
+Nginx Unit is controlled through an API/config model rather than traditional Nginx `server` blocks. It can run application processes directly and update configuration dynamically. This can be attractive for platforms, but a beginner must learn Unit's listener, route, application, and process model. Do not confuse it with ordinary Nginx reverse proxy config.
+
+## Waitress mental model
+
+Waitress is a WSGI server written in Python. It is simple and cross-platform, which can be helpful on Windows or constrained environments. On a Linux VPS, the ecosystem around Gunicorn, uWSGI, and mod_wsgi is more common for Django production. If you choose Waitress, still put a reverse proxy in front for TLS/static files and keep it private.
+
+## Traefik mental model
+
+Traefik shines when services appear/disappear dynamically, especially in Docker and Kubernetes. Instead of manually writing every route, labels or providers tell Traefik how to route traffic.
+
+That is useful when you have many containers. It is unnecessary overhead for a single Django service that can be described clearly in one Nginx, Apache, or Caddy config file.
+
+## HAProxy mental model
+
+HAProxy is excellent at load balancing and health checks:
+
+```text
+HAProxy
+  -> Django app server A
+  -> Django app server B
+  -> Django app server C
+```
+
+It is usually placed in front of multiple app instances. For one app process on one server, it rarely adds value.
+
+## CDN and object storage request path
+
+Static/media architecture may evolve into:
+
+```text
+browser
+  -> CDN
+  -> object storage or origin server
+```
+
+For public static assets, this is straightforward. For user media, decide whether files are public, private, signed, expiring, cacheable, or subject to deletion rules. Private media needs more than "upload it to S3."
+
+## Cloud load balancer request path
+
+A managed load balancer often does this:
+
+```text
+browser HTTPS
+  -> cloud load balancer terminates TLS
+  -> private app instance HTTP
+  -> Django
+```
+
+Django must understand the original scheme through trusted forwarded headers. App instances must be stateless enough that any instance can handle the next request.
+
+## Final stack decision checklist
+
+Before choosing any stack, answer:
+
+```text
+[ ] Who terminates HTTPS?
+[ ] Who serves static files?
+[ ] Who runs Python workers?
+[ ] How does Django receive secrets?
+[ ] Where does PostgreSQL run?
+[ ] Where do media files live?
+[ ] What restarts after reboot?
+[ ] Where are logs?
+[ ] How are backups created and restored?
+[ ] How is a bad deploy rolled back?
+```
+
+If you cannot answer those questions, the stack is not ready for production yet.
 
 ---
 

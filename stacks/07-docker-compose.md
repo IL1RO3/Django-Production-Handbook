@@ -150,3 +150,41 @@ The proxy publishes HTTP and HTTPS from the host to the container. Do not publis
 Development Compose often mounts source code into the container, enables reloaders, uses simple passwords, and exposes convenience ports. Production Compose should use built images, private networks, real secret handling, pinned versions, backups, logs, and controlled public ports.
 
 Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.
+
+## Compose networking mental model
+
+Compose creates a private network for services. Services can reach each other by service name:
+
+```text
+web container -> db:5432
+proxy container -> web:8000
+```
+
+Inside Compose, `db` is a DNS name. From your laptop or the public internet, `db` is not automatically reachable. Public access happens only through published `ports`.
+
+## Image, container, volume: do not mix them up
+
+| Thing | Meaning |
+|---|---|
+| image | built package/template for a container |
+| container | running instance of an image |
+| volume | persistent storage managed outside the container filesystem |
+| bind mount | host path mounted into a container |
+| network | private communication space between containers |
+
+Deleting a container should not delete PostgreSQL data if the data lives in a named volume. Deleting the volume can delete the database.
+
+## Production questions before choosing Compose
+
+Before using Compose on a server, answer:
+
+- Where are images built: server, CI, registry?
+- How are secrets provided without committing `.env`?
+- How does `collectstatic` run and where do static files land?
+- Where do media files persist?
+- How are database backups created and copied off-host?
+- How are containers restarted after reboot?
+- How are logs collected and rotated?
+- How are image updates tested and rolled back?
+
+Compose can be clean and practical, but it does not answer those questions for you.

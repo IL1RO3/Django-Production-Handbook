@@ -119,3 +119,39 @@ WebSockets can stay open for minutes or hours. That changes capacity planning:
 - Redis/channel layers must stay private and monitored.
 
 Do not switch to ASGI only because it sounds newer. Use it when your application behavior needs it.
+
+## WSGI versus ASGI in plain language
+
+WSGI is the traditional synchronous Python web interface. It is excellent for normal request/response Django pages.
+
+ASGI supports both normal HTTP and long-lived async protocols such as WebSockets. Use ASGI when the application needs behavior like live chat, notifications, collaborative editing, streaming, or Django Channels consumers.
+
+```text
+WSGI: request comes in -> response goes out -> connection is done
+ASGI: connection may stay open -> app may send/receive events over time
+```
+
+## Django ASGI entrypoint
+
+A Django project usually has both files:
+
+```text
+<PROJECT_PACKAGE>/wsgi.py
+<PROJECT_PACKAGE>/asgi.py
+```
+
+Gunicorn imports `wsgi.py`. Uvicorn/Daphne/Hypercorn import `asgi.py`. If you point Uvicorn at `.wsgi:application`, you are not using the intended ASGI entrypoint.
+
+## Channels and Redis mental model
+
+For WebSocket features across multiple workers or servers, Django Channels commonly uses Redis as a channel layer:
+
+```text
+browser WebSocket
+  -> proxy
+  -> ASGI worker
+  -> channel layer Redis
+  -> another worker/consumer may receive event
+```
+
+Redis should be private. If Redis is only used as a channel layer/cache, its backup requirements may differ from PostgreSQL. If you store critical durable data in Redis, your operational requirements change.

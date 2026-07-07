@@ -125,3 +125,47 @@ If the app fails under mod_wsgi but works locally, check:
 7. imports that depend on the current working directory.
 
 mod_wsgi is reliable when configured correctly, but the Python/runtime coupling is stricter than the Gunicorn systemd model.
+
+## Full mod_wsgi request lifecycle
+
+```text
+browser
+  -> Apache virtual host
+  -> Apache serves /static/ directly when matched
+  -> mod_wsgi daemon process imports wsgi.py
+  -> Django handles dynamic request
+  -> Django queries PostgreSQL
+  -> response returns through Apache
+```
+
+There is no Gunicorn service in this stack. That means there is also no Gunicorn journal. Python errors usually appear in Apache's error log.
+
+## What `daemon mode` means
+
+mod_wsgi can run apps in embedded mode or daemon mode. Daemon mode creates a separate process group for the application. This is preferred for Django because it gives you clearer process isolation, easier virtualenv configuration, and more predictable restarts than mixing the app into generic Apache workers.
+
+## mod_wsgi environment example
+
+One common pattern is to adjust `wsgi.py` so it loads environment before Django settings are imported. The exact method depends on your secret-management choice, but the order matters:
+
+```python
+import os
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "<PROJECT_PACKAGE>.settings")
+
+from django.core.wsgi import get_wsgi_application
+application = get_wsgi_application()
+```
+
+By the time `get_wsgi_application()` runs, Django settings must be able to read all required variables. If `SECRET_KEY` or database variables are missing, startup fails.
+
+## When mod_wsgi is the wrong choice
+
+Avoid mod_wsgi when:
+
+- you do not control the Python/mod_wsgi version compatibility;
+- your team is more comfortable with systemd service logs than Apache-hosted Python logs;
+- you need ASGI/WebSockets;
+- you want the simplest beginner path on a clean VPS.
+
+It is a valid production stack, but it is less forgiving for beginners than Apache/Nginx proxying to Gunicorn.

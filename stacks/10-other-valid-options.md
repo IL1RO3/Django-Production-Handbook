@@ -37,3 +37,74 @@ Cloud providers often offer managed HTTP/TLS load balancers. These can terminate
 ## The selection rule
 
 A technology is not better because it has more features. Prefer the smallest toolset that your team can correctly configure, monitor, patch, back up, and recover.
+
+## Nginx Unit mental model
+
+Nginx Unit is controlled through an API/config model rather than traditional Nginx `server` blocks. It can run application processes directly and update configuration dynamically. This can be attractive for platforms, but a beginner must learn Unit's listener, route, application, and process model. Do not confuse it with ordinary Nginx reverse proxy config.
+
+## Waitress mental model
+
+Waitress is a WSGI server written in Python. It is simple and cross-platform, which can be helpful on Windows or constrained environments. On a Linux VPS, the ecosystem around Gunicorn, uWSGI, and mod_wsgi is more common for Django production. If you choose Waitress, still put a reverse proxy in front for TLS/static files and keep it private.
+
+## Traefik mental model
+
+Traefik shines when services appear/disappear dynamically, especially in Docker and Kubernetes. Instead of manually writing every route, labels or providers tell Traefik how to route traffic.
+
+That is useful when you have many containers. It is unnecessary overhead for a single Django service that can be described clearly in one Nginx, Apache, or Caddy config file.
+
+## HAProxy mental model
+
+HAProxy is excellent at load balancing and health checks:
+
+```text
+HAProxy
+  -> Django app server A
+  -> Django app server B
+  -> Django app server C
+```
+
+It is usually placed in front of multiple app instances. For one app process on one server, it rarely adds value.
+
+## CDN and object storage request path
+
+Static/media architecture may evolve into:
+
+```text
+browser
+  -> CDN
+  -> object storage or origin server
+```
+
+For public static assets, this is straightforward. For user media, decide whether files are public, private, signed, expiring, cacheable, or subject to deletion rules. Private media needs more than "upload it to S3."
+
+## Cloud load balancer request path
+
+A managed load balancer often does this:
+
+```text
+browser HTTPS
+  -> cloud load balancer terminates TLS
+  -> private app instance HTTP
+  -> Django
+```
+
+Django must understand the original scheme through trusted forwarded headers. App instances must be stateless enough that any instance can handle the next request.
+
+## Final stack decision checklist
+
+Before choosing any stack, answer:
+
+```text
+[ ] Who terminates HTTPS?
+[ ] Who serves static files?
+[ ] Who runs Python workers?
+[ ] How does Django receive secrets?
+[ ] Where does PostgreSQL run?
+[ ] Where do media files live?
+[ ] What restarts after reboot?
+[ ] Where are logs?
+[ ] How are backups created and restored?
+[ ] How is a bad deploy rolled back?
+```
+
+If you cannot answer those questions, the stack is not ready for production yet.

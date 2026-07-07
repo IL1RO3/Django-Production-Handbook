@@ -131,3 +131,33 @@ uwsgi_pass 127.0.0.1:8002;
 This forwards the request to the private uWSGI endpoint. Use `uwsgi_pass`, not `proxy_pass`, when speaking the uWSGI protocol.
 
 The confusing part is naming: uWSGI is both a server and a protocol. Nginx `uwsgi_pass` means it is using the protocol; it does not mean Nginx is running your Python app itself.
+
+## uWSGI request lifecycle
+
+```text
+browser
+  -> Nginx receives HTTPS request
+  -> Nginx serves static files directly when matched
+  -> Nginx sends dynamic request with uwsgi protocol
+  -> uWSGI imports Django WSGI application
+  -> Django handles request
+  -> PostgreSQL stores/loads data
+```
+
+The main difference from Gunicorn is the Nginx-to-app protocol and uWSGI's configuration model. Gunicorn usually receives HTTP from the proxy. uWSGI often receives the uWSGI protocol through `uwsgi_pass`.
+
+## uWSGI operational cautions
+
+uWSGI has many options because it is broad and mature. That flexibility is useful for experienced operators and confusing for beginners. Add options only when you know what behavior they change.
+
+Common mistakes:
+
+| Mistake | Result |
+|---|---|
+| using `proxy_pass` instead of `uwsgi_pass` | Nginx speaks the wrong protocol |
+| wrong `module` path | app fails to load |
+| wrong virtualenv in `home` | missing package/import errors |
+| public uWSGI socket | app server exposed without HTTP edge protections |
+| too many processes/threads | memory or DB connection pressure |
+
+If you already know Gunicorn, choose uWSGI only for a specific operational reason.

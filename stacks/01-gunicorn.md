@@ -114,3 +114,28 @@ That is why this guide binds Gunicorn to loopback:
 ```
 
 Only processes on the same server can reach that address. The public internet reaches Nginx/Apache/Caddy on ports 80 and 443, and the proxy reaches Gunicorn privately.
+
+## Common Gunicorn failure modes
+
+| Symptom | Likely cause | First place to look |
+|---|---|---|
+| service fails immediately | wrong module path, missing dependency, missing env var | `journalctl -u <APP_NAME>` |
+| `Address already in use` | another service is bound to the same port | `sudo ss -ltnp` |
+| requests hang | worker exhaustion, slow DB/API call, deadlock | Gunicorn logs, Django logs, DB activity |
+| frequent worker timeouts | slow view, slow query, external API wait, too few workers | app traces and request logs |
+| high memory usage | too many workers, memory leak, large in-process data | `systemctl status`, metrics, process list |
+
+Do not tune Gunicorn by copying random worker counts. First identify whether the bottleneck is CPU, memory, database, network, or application code.
+
+## Development versus production Gunicorn
+
+During development, Django's `runserver` reloads code and prints friendly tracebacks. Gunicorn does not exist to make local development nicer; it exists to run stable worker processes in production. In production:
+
+- code changes require a restart or reload;
+- logs go to systemd or a configured log path;
+- secrets come from the service environment;
+- the process runs as a limited user;
+- the bind address is private;
+- a reverse proxy handles public HTTP/TLS.
+
+That difference is intentional. Production values repeatability and control over convenience.

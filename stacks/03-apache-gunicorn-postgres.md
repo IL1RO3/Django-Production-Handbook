@@ -168,3 +168,36 @@ sudo systemctl reload apache2
 ```
 
 Reload asks Apache to reread configuration without a full stop/start when possible. If config syntax is broken, do not reload until it is fixed.
+
+## What Apache is responsible for in this stack
+
+Apache plays the same public-edge role that Nginx plays in the reference stack. It should handle HTTP/TLS, static files, public media if applicable, proxying to Gunicorn, request headers, and access/error logs.
+
+Gunicorn still owns Python worker management. PostgreSQL still owns durable relational data. Keeping those responsibilities separate makes debugging easier.
+
+## Apache request path
+
+```text
+browser
+  -> Apache virtual host selected by ServerName/ServerAlias
+  -> Alias serves /static/ or /media/ from disk
+  -> ProxyPass sends dynamic requests to Gunicorn
+  -> Gunicorn runs Django WSGI app
+  -> Django queries PostgreSQL
+```
+
+If Apache returns a 404 for a static file, inspect Apache `Alias` and filesystem paths. If Apache returns 502/503, inspect the Gunicorn service. If Django returns 500, inspect the app journal and Django traceback.
+
+## Apache module mental model
+
+Apache features are often modules. The config only works when the required modules are enabled:
+
+| Module | Why this stack needs it |
+|---|---|
+| `proxy` | base proxy capability |
+| `proxy_http` | proxy HTTP requests to Gunicorn |
+| `headers` | set `X-Forwarded-Proto` and similar headers |
+| `ssl` | serve HTTPS |
+| `rewrite` | redirects and Certbot-managed rules |
+
+If Apache says a directive is invalid, the module that provides that directive may not be enabled.

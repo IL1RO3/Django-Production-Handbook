@@ -120,3 +120,47 @@ sudo journalctl -u caddy -n 100 --no-pager
 Shows Caddy logs, including certificate and proxy errors.
 
 Caddy is concise, but you still need to understand the path behavior. Most Caddy static-file mistakes come from confusing `handle`, `handle_path`, `root`, and the URL prefix that remains after matching.
+
+## Caddy request path
+
+```text
+browser
+  -> Caddy site block selected by hostname
+  -> automatic TLS certificate is used when available
+  -> /static/* and /media/* may be served from disk
+  -> reverse_proxy sends dynamic requests to Gunicorn
+  -> Gunicorn runs Django
+  -> Django talks to PostgreSQL
+```
+
+Caddy hides some TLS complexity, but the architecture is still the same: public proxy in front, private Python app server behind it.
+
+## Automatic HTTPS does not remove verification
+
+Caddy can issue and renew certificates automatically, but it still depends on:
+
+- DNS pointing to the server;
+- ports 80 and 443 being reachable;
+- Caddy being able to write its certificate storage;
+- no conflicting service already bound to 80/443;
+- correct hostnames in the Caddyfile.
+
+If certificate issuance fails, read `journalctl -u caddy`; do not assume Django is involved.
+
+## `handle` versus `handle_path`
+
+`handle_path /static/*` strips the matched `/static` prefix before file lookup. Plain `handle /static/*` does not strip it. This distinction is a common source of confusing 404s.
+
+If your disk has:
+
+```text
+/srv/example/staticfiles/admin/css/base.css
+```
+
+and the browser requests:
+
+```text
+/static/admin/css/base.css
+```
+
+`handle_path /static/*` with `root * /srv/example/staticfiles` can find `admin/css/base.css` under that root. Test this before launch.

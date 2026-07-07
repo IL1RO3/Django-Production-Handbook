@@ -173,3 +173,48 @@ Use this order:
 8. `curl -I https://<DOMAIN>/` tests the public HTTPS path after TLS.
 
 This order prevents guessing. A 502 is different from DNS failure, and both are different from a Django 500.
+
+## What Nginx is responsible for in this stack
+
+Nginx is the public HTTP edge. It should handle:
+
+- listening on ports 80 and 443;
+- redirecting HTTP to HTTPS after certificates work;
+- serving static files from `STATIC_ROOT`;
+- serving public media if local media is the chosen design;
+- forwarding dynamic requests to Gunicorn;
+- setting proxy headers for Django;
+- writing access/error logs;
+- buffering slow clients so Python workers are not tied up unnecessarily.
+
+Nginx should not run Django code, connect directly to PostgreSQL, or store application secrets.
+
+## Request path with failure points
+
+```text
+browser
+  -> DNS resolves domain
+  -> provider firewall allows 80/443
+  -> UFW allows 80/443
+  -> Nginx chooses server block by server_name
+  -> /static/ and /media/ may be served from disk
+  -> other paths proxy to 127.0.0.1:8000
+  -> Gunicorn sends request into Django
+  -> Django talks to PostgreSQL
+```
+
+When something breaks, locate the failed arrow. If DNS is wrong, Django settings cannot fix it. If Gunicorn is stopped, changing Nginx `server_name` cannot fix it.
+
+## Static files in this stack
+
+`collectstatic` copies static files into `STATIC_ROOT`. Nginx then serves that directory. The flow is:
+
+```text
+Django app static sources
+  -> manage.py collectstatic
+  -> /srv/<APP_NAME>/staticfiles
+  -> Nginx alias /static/
+  -> browser downloads CSS/JS/images
+```
+
+If the admin has no CSS, check `collectstatic`, `STATIC_ROOT`, the Nginx `alias`, and filesystem permissions.
