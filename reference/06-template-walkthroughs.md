@@ -1,0 +1,230 @@
+# Template walkthroughs: explain every important line
+
+The `templates/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
+
+## `templates/app.env.example`
+
+```dotenv
+DJANGO_SECRET_KEY='replace-with-a-long-random-secret'
+```
+
+This is the cryptographic secret Django uses for signing data such as sessions and password-reset tokens. In production it must be unique, long, unpredictable, and private. If it leaks, rotate it.
+
+```dotenv
+DJANGO_DEBUG=False
+```
+
+This disables development debug behavior. Production debug pages can expose settings, paths, SQL, environment details, and stack traces.
+
+```dotenv
+DJANGO_ALLOWED_HOSTS=<DOMAIN>,<WWW_DOMAIN>
+```
+
+This is the comma-separated list of hostnames Django is allowed to serve. It should match the domains users type into the browser.
+
+```dotenv
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<DOMAIN>,https://<WWW_DOMAIN>
+```
+
+This is used for CSRF protection on HTTPS forms and unsafe requests. Include the scheme (`https://`) because Django expects origins, not just hostnames.
+
+```dotenv
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+```
+
+These say Django should connect to PostgreSQL on the same server using PostgreSQL's default TCP port. If you move PostgreSQL to a private managed database, these values change.
+
+## `templates/django-production-settings.py`
+
+This file demonstrates a production settings shape. The most important idea is that code contains names of required settings, while the server supplies values.
+
+```python
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+```
+
+The app refuses to start if the secret is missing. That is safer than silently generating a different key on every restart.
+
+```python
+DEBUG = env_bool("DJANGO_DEBUG", False)
+```
+
+This reads a string from the environment and converts it to a boolean. Never write `DEBUG = os.environ.get("DJANGO_DEBUG")` because the string `"False"` would still behave like true in many Python checks.
+
+```python
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+```
+
+This converts `example.com,www.example.com` into `['example.com', 'www.example.com']`.
+
+```python
+"ENGINE": "django.db.backends.postgresql"
+```
+
+This tells Django to use PostgreSQL, not SQLite. The database driver must be installed in your Python environment.
+
+```python
+"CONN_MAX_AGE": 60
+```
+
+This allows Django to reuse database connections for up to 60 seconds. It can improve performance, but too many workers can still create too many database connections.
+
+```python
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+```
+
+Use this only when the reverse proxy is trusted and Gunicorn/Uvicorn is private. It tells Django that requests with `X-Forwarded-Proto: https` were HTTPS at the public edge.
+
+## `templates/gunicorn.service`
+
+```ini
+[Unit]
+Description=<APP_NAME> Django application via Gunicorn
+After=network.target postgresql.service
+Wants=postgresql.service
+```
+
+`[Unit]` describes the service and its startup relationship. `After` means systemd should start this after the network and PostgreSQL service. `Wants` asks systemd to start PostgreSQL too, but it is not as strict as `Requires`.
+
+```ini
+[Service]
+Type=simple
+```
+
+`Type=simple` means the process started by `ExecStart` is the service process. This fits Gunicorn when it stays in the foreground.
+
+```ini
+User=<APP_USER>
+Group=<APP_USER>
+```
+
+Gunicorn runs as a limited application user. If someone exploits the Python process, they get that user's permissions, not root permissions.
+
+```ini
+WorkingDirectory=/srv/<APP_NAME>/app
+```
+
+This makes relative paths resolve from the application repository directory.
+
+```ini
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+```
+
+Systemd loads deployment-specific variables before starting Gunicorn.
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/gunicorn \
+  --workers 3 \
+  --bind 127.0.0.1:8000 \
+  --access-logfile - \
+  --error-logfile - \
+  <PROJECT_PACKAGE>.wsgi:application
+```
+
+This starts Gunicorn from the virtual environment, creates three workers, listens only on the local server, sends logs to the journal, and imports Django's WSGI application.
+
+```ini
+Restart=on-failure
+RestartSec=5
+```
+
+If Gunicorn crashes, systemd waits five seconds and starts it again. This helps with unexpected crashes but does not fix a permanent configuration error.
+
+## `templates/nginx-site.conf`
+
+```nginx
+server_name <DOMAIN> <WWW_DOMAIN>;
+```
+
+This must match the hostnames in DNS and Django `ALLOWED_HOSTS`.
+
+```nginx
+location /static/ {
+    alias /srv/<APP_NAME>/staticfiles/;
+}
+```
+
+Nginx serves collected static files directly. Django should not spend Python worker time serving CSS, JavaScript, and images in production.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+```
+
+Everything else goes to Gunicorn. This is the reverse-proxy handoff.
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+These headers preserve public request information so Django can make correct security and URL decisions.
+
+## `templates/docker-compose.yml`
+
+```yaml
+services:
+```
+
+A Compose file defines named containers that work together.
+
+```yaml
+web:
+  build: .
+  command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+```
+
+The `web` service builds your app image and runs Gunicorn inside the container. Inside a container, binding to `0.0.0.0` is normal because Docker controls how the container port is exposed.
+
+```yaml
+db:
+  image: postgres:16
+```
+
+The `db` service runs PostgreSQL. Pin a major version deliberately; changing database major versions is an upgrade project, not a casual edit.
+
+```yaml
+volumes:
+  postgres_data:
+```
+
+The database needs persistent storage. Without a volume, deleting the container can delete the database data.
+
+## `templates/db-backup.service` and `.timer`
+
+A systemd service describes what one backup run does. A systemd timer describes when that service runs.
+
+```ini
+Type=oneshot
+```
+
+The backup command runs, finishes, and exits. It is not a long-running daemon.
+
+```ini
+UMask=0077
+```
+
+New backup files should be private by default. Database dumps can contain user data, password hashes, private content, and business data.
+
+```ini
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+```
+
+This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
+
+## How to adapt a template safely
+
+Use this checklist every time you copy a template:
+
+```text
+[ ] Replace every placeholder: <APP_NAME>, <DOMAIN>, <PROJECT_PACKAGE>, users, database names.
+[ ] Confirm file paths exist on the server.
+[ ] Confirm ownership and permissions match the service user.
+[ ] Test syntax: nginx -t, apache2ctl configtest, systemd daemon-reload.
+[ ] Start or reload the service.
+[ ] Read logs immediately after startup.
+[ ] Test the public URL and health check.
+```
+
+If you cannot explain a line, leave a note and look it up before production use. Unknown config is operational debt.

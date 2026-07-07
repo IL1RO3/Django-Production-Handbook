@@ -6,6 +6,11 @@ This guide is deliberately **explanatory**. It teaches what each layer is, why i
 
 ## Who this is for
 
+This book is intentionally written for people who can build a Django project but feel lost when it leaves their laptop. It does not assume that words like reverse proxy, systemd, TLS, socket, migration, worker, or environment variable are already obvious. When a command appears, the goal is to explain what layer it touches, what can go wrong, and how to verify it.
+
+If you are experienced, you can skim the explanations and use the checklists. If you are new, read slowly and treat each code block as something to understand before you paste it. Production work becomes safer when you can explain every line you run.
+
+
 You know basic Linux commands, Python, Git, and Django. You may never have deployed a public service before.
 
 ## What this book covers

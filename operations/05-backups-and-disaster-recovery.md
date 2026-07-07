@@ -90,3 +90,45 @@ You should be able to answer:
 - How quickly must service return (RTO)?
 
 If there is no answer, the system has a recovery risk—not merely a documentation gap.
+
+## Explain the `pg_dump` flags
+
+```bash
+sudo -u postgres pg_dump   --format=custom   --no-owner   --no-privileges   --file=/var/backups/<APP_NAME>/postgresql/<APP_NAME>-$(date -u +%Y%m%dT%H%M%SZ).dump   <DB_NAME>
+```
+
+Line by line:
+
+| Part | Meaning |
+|---|---|
+| `sudo -u postgres` | run as the PostgreSQL operating-system admin user |
+| `pg_dump` | create a logical backup of a database |
+| `--format=custom` | use PostgreSQL's custom archive format, which works well with `pg_restore` |
+| `--no-owner` | do not force restore ownership to the original database owner |
+| `--no-privileges` | do not restore original grant statements automatically |
+| `--file=...` | write the backup to this file |
+| `$(date -u ...)` | put a UTC timestamp in the filename so backups do not overwrite each other |
+| `<DB_NAME>` | the database to dump |
+
+The command backs up database contents, not local media files and not environment files. Those need separate backup paths.
+
+## What a restore drill proves
+
+A restore drill proves more than "the file exists." It proves:
+
+- the backup file is readable;
+- the PostgreSQL version can restore it;
+- the restore command is documented correctly;
+- the database has enough disk space;
+- operators know the steps before an emergency;
+- the backup contains what the application actually needs.
+
+Do restore drills into a separate test database. Never practice by overwriting production.
+
+## RPO and RTO in plain language
+
+RPO means "how much data can we afford to lose?" If backups run nightly, your worst normal loss may be close to 24 hours of database changes.
+
+RTO means "how long can the service be down while we recover?" If rebuilding a VPS from scratch takes four hours, your real RTO is not five minutes.
+
+These are business decisions, not only technical settings. A hobby blog and a paid SaaS product should not have the same recovery promises.

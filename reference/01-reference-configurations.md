@@ -19,3 +19,7 @@ This page links to the templates in `templates/`. They are intentionally generic
 | [`templates/docker-compose.yml`](../templates/docker-compose.yml) | conceptual Compose topology |
 
 Read the accompanying stack/operations chapter before using a template. Config files are not interchangeable: proxy headers, locations, socket paths, users, and TLS ownership must match the selected stack.
+
+## Learn the templates line by line
+
+Use [Template walkthroughs](06-template-walkthroughs.md) when a config file is correct but still feels mysterious. It explains the important lines in the environment file, Django settings, Gunicorn service, Nginx site, Docker Compose file, and backup timers.

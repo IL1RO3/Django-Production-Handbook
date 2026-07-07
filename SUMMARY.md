@@ -61,4 +61,5 @@
 - [Troubleshooting map](reference/03-troubleshooting.md)
 - [Glossary](reference/04-glossary.md)
 - [Official sources](reference/05-official-sources.md)
+- [Template walkthroughs](reference/06-template-walkthroughs.md)
 - [Complete all-in-one handbook](appendix/complete-handbook.md)

@@ -1,578 +1,585 @@
 # Complete all-in-one handbook
 
-This appendix preserves the earlier linear handbook in one long reading path. The chaptered pages are the preferred GitBook navigation; this version is useful for offline reading, search, and printing.
+This appendix is generated from the current chaptered GitBook pages. The chaptered pages remain the preferred navigation; this file is for offline reading, search, printing, and one-page review.
+
+> If a chapter and this appendix ever disagree, update the chapter first and regenerate this appendix from `SUMMARY.md`.
 
 ---
 
-# Complete all-in-one handbook
+<!-- Source: README.md -->
 
-## From a bare Django project to a secure, understandable, maintainable public service
+# Django Production Deployment Guide
 
-**Audience:** You know basic Linux commands, Python, Git, and Django. You want to understand what each production component does, why it exists, how it connects to the next component, and how to publish the project responsibly as open source.
+> A GitBook-ready, docs-as-code handbook for moving a bare Django project from a developer laptop to a secure, repeatable production service.
 
-**Recommended learning path in this handbook:**
+This guide is deliberately **explanatory**. It teaches what each layer is, why it exists, when to choose it, how the pieces communicate, how to configure them, and how to operate the system after launch.
+
+## Who this is for
+
+This book is intentionally written for people who can build a Django project but feel lost when it leaves their laptop. It does not assume that words like reverse proxy, systemd, TLS, socket, migration, worker, or environment variable are already obvious. When a command appears, the goal is to explain what layer it touches, what can go wrong, and how to verify it.
+
+If you are experienced, you can skim the explanations and use the checklists. If you are new, read slowly and treat each code block as something to understand before you paste it. Production work becomes safer when you can explain every line you run.
+
+
+You know basic Linux commands, Python, Git, and Django. You may never have deployed a public service before.
+
+## What this book covers
+
+- The request path: browser → DNS → firewall → reverse proxy → application server → Django → database.
+- Django production configuration, static/media handling, secrets, migrations, and health checks.
+- Major server stacks: **Nginx + Gunicorn**, **Apache + Gunicorn**, **Apache + mod_wsgi**, **Caddy + Gunicorn**, **ASGI with Uvicorn/Daphne/Hypercorn**, Docker Compose, managed platforms, and a practical introduction to Kubernetes.
+- Ubuntu/VPS provisioning, SSH, UFW, Fail2Ban, TLS/Let’s Encrypt, systemd, PostgreSQL, monitoring, backup/restore, CI, staging, releases, and incident response.
+- How to package the application as a responsible open-source project.
+
+## Scope and honest boundaries
+
+No book can enumerate every hosting provider, reverse proxy, cloud service, operating system, and framework combination. This one covers the **major architecture families** and gives you a decision process. The reference runbooks target a single Ubuntu VPS with PostgreSQL and a public domain; concepts transfer to other environments.
+
+## Recommended first serious stack
+
+For most conventional Django applications on one VPS:
 
 ```text
 Browser
-  -> DNS
-  -> provider network firewall
-  -> UFW host firewall
-  -> Apache HTTP Server
-  -> Gunicorn
-  -> Django (WSGI)
-  -> PostgreSQL
+  → DNS
+  → provider firewall
+  → UFW
+  → Nginx or Apache (HTTPS, static files, reverse proxy)
+  → Gunicorn (private WSGI application server)
+  → Django
+  → PostgreSQL (private database)
 ```
 
-This is not a one-command recipe. Each command belongs to a layer, has a purpose, and has a verification step. Read the explanation before applying a command. Replace all placeholders consistently.
+Choose **Nginx + Gunicorn** when you want the common reverse-proxy path. Choose **Apache + Gunicorn** when Apache is already standard in your environment. Choose **Caddy + Gunicorn** when simple automatic HTTPS is a priority. Use **ASGI** only when your application needs WebSockets or other async/long-lived connections.
 
-> **The central principle:** production is not “the same code on another computer.” Production is code plus a database plus secrets plus operating-system services plus network policy plus backups plus a repeatable way to update and recover it.
+## Start here
 
-<div class="chapter-break"></div>
+1. Read [Mental model](../foundations/01-mental-model.md).
+2. Read [Choose your architecture](../foundations/03-choose-your-stack.md).
+3. Follow the [reference deployment path](../stacks/02-nginx-gunicorn-postgres.md) for a first VPS deployment.
+4. Do not skip [security](../operations/02-firewall-ssh-and-host-security.md), [backups](../operations/05-backups-and-disaster-recovery.md), or [open-source publication](../open-source/01-publishing-a-project.md).
 
-# Table of contents
+## How to use this as GitBook
 
-1. The mental model: what “deployment” actually means
-2. The request journey: one browser request from domain to database
-3. The technologies explained: DNS, Apache, Gunicorn, WSGI, systemd, PostgreSQL, UFW, TLS, Certbot, Git
-4. Choosing an architecture: Apache + Gunicorn, mod_wsgi, Nginx, ASGI, containers, managed platforms
-5. The canonical beginner architecture and why it is recommended
-6. Project design before the server exists
-7. Making a Django project production-aware
-8. Building a clean public repository and publishing it as open source
-9. Provisioning a new Ubuntu VPS safely
-10. Linux users, directories, ownership, groups, and permissions
-11. Installing packages and creating PostgreSQL correctly
-12. Production secrets and environment variables
-13. Django production settings, explained line by line
-14. Gunicorn and systemd, explained line by line
-15. Apache reverse proxying, static files, and virtual hosts, explained line by line
-16. TLS/HTTPS and Certbot, explained without magic
-17. Firewall, SSH, Fail2Ban, updates, and a realistic security baseline
-18. Deployment runbooks: normal releases, migrations, static assets, and rollbacks
-19. Backups, restores, off-server copies, and disaster recovery
-20. Logs, monitoring, health checks, and incident response
-21. Testing: unit, integration, browser, staging, and production smoke tests
-22. Scaling and architecture changes later
-23. Common mistakes, why they happen, and how to recover safely
-24. A complete reference configuration
-25. Open-source maintenance: releases, SemVer, CI, security policy, issues, contributors
-26. Final checklists and glossary
-27. Official references
+This repository contains `README.md` and `SUMMARY.md` navigation plus plain Markdown pages. Push it to GitHub/GitLab, then connect the repository to a GitBook Space using Git Sync/import. See [GitBook setup](../GITBOOK_SETUP.md).
 
-<div class="chapter-break"></div>
+## Safety rule
 
-# Part I - Understand the system before configuring it
+Every command is a template. Replace placeholders such as `<APP_NAME>`, `<DOMAIN>`, `<DEPLOY_USER>`, and `<PROJECT_PACKAGE>`. Read the explanation and verification step before applying it to a live system.
 
-# 1. What production deployment actually means
+---
 
-A Django development server is optimized for *developer feedback*. It reloads code, displays detailed errors, and is easy to start with one command:
+<!-- Source: foundations/01-mental-model.md -->
+
+# 1. The production mental model
+
+A Django project is not “deployed” merely because `python manage.py runserver` is reachable from a browser. The development server is designed for feedback while writing code: it reloads automatically, exposes helpful errors, and assumes a trusted developer environment. A production system needs different guarantees:
+
+- It starts after a reboot.
+- It handles concurrent requests.
+- It keeps secrets out of source control.
+- It speaks HTTPS correctly.
+- It keeps the database private.
+- It can be updated, observed, backed up, and recovered deliberately.
+
+## Production is a system of states
+
+| State category | Examples | Put in Git? | Recovery method |
+|---|---|---:|---|
+| Source code | Python, templates, migrations, CSS, config templates | Yes | clone / checkout a commit or tag |
+| Secrets | `SECRET_KEY`, API tokens, DB password | Never | protected transfer, secret manager, rotation |
+| Database data | users, posts, orders, settings | No | verified database backup and restore |
+| Uploaded media | images, documents, attachments | No | file/object-storage backup |
+| Static build output | `collectstatic` result | Usually no | regenerate from code |
+| Runtime state | sockets, PIDs, caches, service logs | No | recreate with systemd/services |
+
+The most common deployment mistakes happen when a server contains **hidden state**: someone edited a settings file manually, a password only exists in one shell history, a database has no tested backup, or the server runs code that Git does not know about.
+
+## The separation of responsibilities
+
+A healthy small deployment usually splits roles:
+
+```text
+Public internet
+  ↓
+Reverse proxy / web server      handles TLS, static files, hostnames, client connections
+  ↓
+Application server              runs Python workers (Gunicorn/uWSGI/Uvicorn/Daphne)
+  ↓
+Django                          routes requests, authorizes users, renders responses
+  ↓
+PostgreSQL                      stores durable relational data
+```
+
+Each layer has a smaller job than “do everything.” That makes debugging traceable:
+
+- A certificate error is usually DNS/TLS/web-server territory.
+- A `502` usually means proxy → app-server connectivity.
+- A `500` usually means Django code, configuration, or database.
+- A missing CSS file usually means static file configuration.
+- A `403 CSRF` usually means browser origin, proxy HTTPS headers, or cookie/security settings.
+
+## The operating principle: inspect before you mutate
+
+Before changing a server, inspect its current state:
 
 ```bash
-python manage.py runserver
+systemctl status <service>
+sudo ufw status numbered
+sudo nginx -t              # when Nginx is used
+sudo apache2ctl configtest # when Apache is used
+git status --short --branch
 ```
 
-That is excellent locally. It is deliberately not a public application server. A public service must survive reboots, accept concurrent requests, protect secrets, terminate encrypted connections, recover from application crashes, and provide enough evidence to debug a failure later.
+Make one change at a time, verify it, and keep a recovery path. This book favors small, reversible operations over one enormous copy-paste block.
 
-A production deployment is therefore a system of responsibilities:
+## What “secure enough” means
 
-| Layer | Main responsibility | Why it exists | Should the public internet reach it directly? |
-|---|---|---|---|
-| Domain and DNS | Map a human name to an IP address | People remember names; networks route to IPs | DNS is public by design |
-| Provider firewall | Filter traffic before it reaches the VPS | Reduces exposed network surface at the provider edge | It is an external boundary |
-| UFW | Filter traffic on the Linux host | Enforces a second local boundary | Yes, it sees incoming packets |
-| Apache | Accept HTTP/HTTPS, serve files, proxy app requests | Mature TLS, logging, virtual-host, and static-file handling | Yes: ports 80/443 |
-| Gunicorn | Run Python worker processes for Django | Makes Django available as a WSGI application service | No: bind to localhost only |
-| Django | Application logic, URLs, forms, permissions, ORM | This is your web application | No direct network port |
-| PostgreSQL | Durable relational data storage | Data survives process restarts and supports concurrent work | No: localhost/private network only |
-| systemd | Start, restart, supervise, and log services | The app must return after a crash or reboot | Local only |
-| Certbot / ACME client | Obtain and renew browser-trusted certificates | Browsers require TLS for secure HTTPS | Local only |
-| Git and release tags | Track approved source code versions | Makes deployments and rollbacks traceable | Local / remote repository |
-| Backups | Preserve recoverable copies of data | Hardware, operator error, and bugs happen | Stored separately from the app |
+There is no absolute finish line called “secure.” For a small public Django service, a serious baseline means:
 
-## 1.1 “Works once” is not deployed
+- supported OS packages are patched,
+- SSH uses keys and root login is disabled after verification,
+- only necessary inbound ports are open,
+- PostgreSQL and application ports are not public,
+- secrets are outside Git and readable only by necessary accounts,
+- HTTPS is on and renewal is tested,
+- Django production checks are clean or consciously reviewed,
+- backups are automated, verified, and copied off the host,
+- logs and an incident runbook exist.
 
-A site is not truly deployed just because it opens in one browser. A minimum production definition is:
+## How to read commands in this book
 
-- A reboot starts the web server and application automatically.
-- The application has no secret values committed to Git.
-- The database is private.
-- Only the required ports are publicly reachable.
-- HTTPS is enforced and certificate renewal is tested.
-- An update procedure is written down and repeatable.
-- A backup exists, has been verified, and has an off-server copy.
-- Logs identify whether a failure belongs to Apache, Gunicorn, Django, PostgreSQL, DNS, or the client.
-- The source repository can reproduce the application on a new server.
+A terminal command is not magic. It is a request to change or inspect one layer of the system. Before running a command, identify four things:
 
-## 1.2 State is the source of most deployment pain
+| Question | Example |
+|---|---|
+| Who runs it? | root through `sudo`, the deploy user, the app user, or `postgres` |
+| Where is it run? | your laptop, the VPS shell, inside a container, or inside PostgreSQL |
+| What does it change? | files, packages, services, database schema, firewall rules, or only output |
+| How do you verify it? | `systemctl status`, `nginx -t`, `curl`, `journalctl`, `psql`, or a browser |
 
-Your **source code** is only one category of state. These must be separated mentally:
+For example:
 
-| Category | Examples | Should it be committed to Git? | How is it moved or recovered? |
-|---|---|---|---|
-| Code | Python, templates, migrations, CSS, deployment templates | Yes | Git clone/pull/tag |
-| Configuration | allowed hosts, production mode, email endpoint | Template only | protected environment file or secret manager |
-| Secrets | `SECRET_KEY`, database password, API tokens | Never | secure transfer, rotate after exposure |
-| Database data | users, posts, orders, sessions | No | tested database backup and restore |
-| Uploaded media | avatars, documents, user images | No | file backup / object storage / rsync |
-| Generated static files | `collectstatic` output | Usually no | regenerate from committed source |
-| Runtime state | PIDs, sockets, caches, log streams | No | recreated by systemd/service startup |
+```bash
+sudo systemctl restart <APP_NAME>
+```
 
-The goal is to make every non-code state category explicit. Hidden state is what makes a server impossible to move or repair safely.
+This is a server command. `sudo` means it asks for administrator privileges. `systemctl` talks to systemd. `restart` stops and starts the service. `<APP_NAME>` is a placeholder for the service unit name. The command does not deploy code by itself; it only tells the already-installed service to start again using the files and environment currently on disk.
 
-<div class="chapter-break"></div>
+A safe follow-up is:
 
-# 2. The request journey: from browser to Django and back
+```bash
+sudo systemctl status <APP_NAME>
+sudo journalctl -u <APP_NAME> -n 50 --no-pager
+```
 
-Imagine a visitor requests:
+The first command asks whether systemd thinks the service is running. The second shows recent logs. If the restart failed, the logs usually explain whether the cause was Python import failure, missing environment variable, database connection error, bad permissions, or a crashed worker.
+
+## Placeholders are not optional thinking
+
+Angle-bracket values such as `<APP_NAME>`, `<DOMAIN>`, `<APP_USER>`, and `<DB_NAME>` are placeholders. Replace them consistently with your real values. Do not leave angle brackets in real config files unless the tool explicitly expects them.
+
+A good private deployment note might say:
+
+```text
+APP_NAME=exampleapp
+PROJECT_PACKAGE=config
+DOMAIN=example.com
+WWW_DOMAIN=www.example.com
+DEPLOY_USER=deploy
+APP_USER=exampleapp
+DB_NAME=exampleapp_prod
+DB_USER=exampleapp_user
+```
+
+When a later command says `/srv/<APP_NAME>/venv/bin/python`, you should mentally translate it to `/srv/exampleapp/venv/bin/python`. This habit prevents many copy/paste mistakes.
+
+---
+
+<!-- Source: foundations/02-request-journey.md -->
+
+# 2. The request journey
+
+Consider a browser visiting:
 
 ```text
 https://example.com/blogs/42/
 ```
 
-The request follows a path. Understanding that path turns debugging from guessing into tracing.
+A working request follows this path:
 
 ```text
-1. Browser asks DNS: “What IP belongs to example.com?”
-2. Browser opens a TCP connection to that IP on port 443.
-3. Provider firewall and UFW decide whether port 443 is allowed.
-4. Apache receives the encrypted HTTPS connection.
-5. Apache proves its identity with a TLS certificate and decrypts the HTTP request.
-6. Apache serves a static file directly OR proxies a dynamic request to Gunicorn.
-7. Gunicorn passes the request into Django through WSGI.
-8. Django matches a URL, executes a view, queries PostgreSQL if needed, and creates a response.
-9. Response travels back: Django -> Gunicorn -> Apache -> browser.
+1. Browser asks DNS for example.com.
+2. DNS returns an IP address.
+3. Browser opens TCP port 443 on that IP.
+4. Provider firewall and host firewall decide whether it may enter.
+5. Nginx, Apache, or Caddy receives the TLS connection.
+6. The web server proves its identity with a certificate and decrypts HTTP.
+7. A static request is served directly; a dynamic request is proxied internally.
+8. Gunicorn/uWSGI/Uvicorn/Daphne calls Django through WSGI or ASGI.
+9. Django resolves URL → view → permissions → database work → response.
+10. The response travels back through the same layers.
 ```
 
-## 2.1 Why there are multiple layers instead of “Django listens on port 443”
+## Why the extra layers are useful
 
-Django can technically receive HTTP in development, but each production layer has a specialized job:
+It may look simpler to expose Django directly. Production layers exist because they are specialists:
 
-- **Apache** is built to manage client connections, TLS, static files, request logs, redirects, and multiple sites.
-- **Gunicorn** is built to manage Python worker processes that execute WSGI applications.
-- **Django** is built to implement your app’s behavior, not to be a general internet-facing web server.
-- **PostgreSQL** is built to keep relational data consistent, not to be exposed to browsers.
+| Component | Specialist responsibility |
+|---|---|
+| DNS | Human name to network address |
+| Reverse proxy | TLS, redirects, static files, client connection handling, access logs |
+| App server | Python worker lifecycle and WSGI/ASGI protocol |
+| Django | application rules, forms, ORM, authorization, templates/API |
+| PostgreSQL | durable transactions, indexes, concurrent data access |
+| systemd | start on boot, restart after failure, service logs |
 
-This division provides failure boundaries. If Gunicorn crashes, systemd restarts it. Apache can still serve a diagnostic error or static maintenance page. If PostgreSQL is unavailable, logs distinguish an app/database failure from a TLS failure.
+This division also reduces attack surface. Only ports 80 and 443 should usually be public. The app server can listen on `127.0.0.1` or a Unix socket; PostgreSQL can listen only locally or on a private network.
 
-## 2.2 A practical troubleshooting map
+## A debugging map
 
-| Symptom | Most likely layer | First checks |
+| Symptom | Most likely layer | First commands/questions |
 |---|---|---|
-| Domain does not resolve | DNS | `dig`, DNS record, TTL, registrar panel |
-| Connection times out | provider firewall, UFW, server availability | provider rules, `ufw status`, service status |
-| Browser says certificate invalid | DNS/TLS/Certbot | certificate domain names, renewal, Apache SSL vhost |
-| HTTP 502/503 | Apache to Gunicorn path | Gunicorn service, port/bind address, Apache error log |
-| HTTP 500 | Django or database | Gunicorn journal, Django traceback, DB credentials |
-| HTTP 404 only for one object | URL/view/data logic | generated URL, queryset filters, stored data |
-| CSS missing | static configuration | `collectstatic`, Apache `Alias`, directory permissions |
-| Login or form gives 403 CSRF | HTTPS/proxy/settings/cookies | trusted origins, forwarded proto, secure cookie settings |
-| App works until reboot | systemd service/configuration | `systemctl is-enabled`, service logs |
+| Domain cannot be resolved | DNS | `dig example.com`, record/TTL/registrar check |
+| Connection timed out | provider firewall/UFW/service | provider network rules, `ufw status`, `systemctl status` |
+| Certificate warning | DNS/TLS/vhost | does DNS point to correct server? does certificate include hostname? |
+| `502 Bad Gateway` | proxy → app server | is Gunicorn/Uvicorn running? correct bind/socket? proxy error log? |
+| `500 Server Error` | Django/DB | `journalctl -u <app-service>`, Django error traceback |
+| `404` for only one object | app URL/data query | generated URL, `slug`, date/timezone, filters |
+| CSS/JS missing | static config | `collectstatic`, `alias`, permissions, browser network tab |
+| CSRF 403 | HTTPS/proxy/settings | current origin, secure cookie, forwarded proto, trusted origins |
+| site dies after reboot | systemd | `systemctl is-enabled <service>` |
 
-<div class="chapter-break"></div>
+Do not jump to application code when the network layer is failing, and do not open ports when the issue is a bad URL pattern. Trace the request from the outside inward.
 
-# 3. The technologies explained
+---
 
-# 3.1 VPS and Ubuntu
+<!-- Source: foundations/03-choose-your-stack.md -->
 
-A **VPS** is a virtual private server: a virtual machine rented from a provider. It gives you an operating system, public IP address, storage, memory, CPU, and root-level administration responsibility.
+# 3. Choose your stack deliberately
 
-**Why use it:** flexibility, predictable cost, no platform lock-in, and the ability to run your chosen database/web stack.
+There is no universal “best stack.” There is a best stack for your requirements, team experience, hosting environment, and maintenance budget.
 
-**Trade-off:** you are responsible for patching, backups, firewall policy, certificate renewal validation, and recovery. A managed platform moves some of this responsibility away from you.
+## Decision matrix
 
-Ubuntu is a Linux distribution. The guide uses Ubuntu’s package manager (`apt`), service manager (`systemd`), and common host firewall frontend (`ufw`). The concepts also apply to Debian and other Linux systems, but package names and file locations may differ.
+| Situation | Recommended starting point | Why |
+|---|---|---|
+| Conventional Django site/API on one VPS | Nginx + Gunicorn + PostgreSQL | common, clear responsibilities, extensive ecosystem |
+| Your organization already uses Apache | Apache + Gunicorn + PostgreSQL | integrates cleanly with existing vhosts/logging/modules |
+| You want the simplest TLS experience | Caddy + Gunicorn + PostgreSQL | automatic certificate provisioning/renewal by default |
+| You must use Apache only | Apache + mod_wsgi + PostgreSQL | fewer moving processes, mature Apache integration |
+| You need WebSockets/async consumers | Nginx/Caddy + Uvicorn/Daphne/Hypercorn + PostgreSQL | ASGI supports long-lived async connections |
+| You want repeatable local/prod environments | Docker Compose | explicit services and dependencies |
+| You do not want OS administration | managed PaaS + managed database | provider owns more infrastructure work |
+| Multiple services/team/complex scaling | container platform/Kubernetes later | operational automation at higher complexity |
 
-# 3.2 DNS
+## The main families
 
-DNS is the internet’s naming system. An **A record** maps a hostname such as `example.com` to an IPv4 address. An **AAAA record** maps it to IPv6. A **CNAME** points one hostname at another hostname.
+### Nginx + Gunicorn
 
-DNS does not host your application. It only tells clients where to attempt a connection.
+**Nginx** is a high-performance web server and reverse proxy. **Gunicorn** runs your WSGI Django workers. Nginx handles public HTTP/HTTPS and static files; Gunicorn stays private.
 
-Important terms:
+**Advantages:** widely documented, excellent proxy/static behavior, simple division of roles, straightforward scale-out.
 
-- **Registrar:** where the domain is registered.
-- **DNS provider:** service that publishes DNS records; it may or may not be the registrar.
-- **TTL:** cache lifetime for a DNS answer. A lower TTL changes faster but does not make a mistake disappear instantly everywhere.
-- **Apex/root domain:** `example.com`.
-- **Subdomain:** `www.example.com`, `api.example.com`, `staging.example.com`.
+**Trade-offs:** two services to configure and observe; certificates are typically handled with Certbot or another ACME client.
 
-# 3.3 HTTP, HTTPS, TLS, and certificates
+### Apache + Gunicorn
 
-HTTP is the request/response protocol used by browsers. HTTPS is HTTP carried inside TLS encryption.
+Apache does the same public-front-door job while Gunicorn runs Django. Choose it when Apache is already your standard or you need Apache-specific modules/operations.
 
-TLS provides three essential properties:
+**Advantages:** mature vhost model, familiar for existing Apache administrators, strong logging/module ecosystem.
 
-1. **Confidentiality:** people on the network cannot casually read the contents.
-2. **Integrity:** intermediaries cannot silently modify data without detection.
-3. **Authentication:** the browser can verify that a certificate is valid for the requested domain.
+**Trade-offs:** often more verbose than Nginx; do not use Apache and Nginx for the same single-app purpose unless you have a clear architecture reason.
 
-A certificate does not encrypt your database or make bad code safe. It protects the network connection between client and server.
+### Apache + mod_wsgi
 
-# 3.4 Apache HTTP Server
+`mod_wsgi` embeds/hosts WSGI applications through Apache. It can run Django in daemon mode.
 
-Apache is an internet-facing web server. In this guide it has four roles:
+**Advantages:** one main HTTP server family; long-standing Django integration; no separate Gunicorn process.
 
-- Listen on ports 80 and 443.
-- Redirect HTTP to HTTPS.
-- Serve static and media files without running Python.
-- Reverse proxy dynamic traffic to Gunicorn.
+**Trade-offs:** Python interpreter/virtualenv compatibility requires care; deployment and isolation can be less intuitive for beginners. Prefer daemon mode, not embedded mode.
 
-A **virtual host** is an Apache configuration block that says, “For this domain name, use these rules.” One server can host multiple domains through multiple virtual hosts.
+### Caddy + Gunicorn
 
-# 3.5 Reverse proxy
+Caddy is a web server and reverse proxy with automatic HTTPS behavior.
 
-A reverse proxy receives a client request and forwards it to an internal application server. The client sees Apache as the server. Gunicorn stays private behind it.
+**Advantages:** very compact configuration; certificate provisioning and renewal are designed into the product; good default ergonomics.
+
+**Trade-offs:** fewer examples than Nginx/Apache in some enterprise environments; still requires correct application, backup, database, and firewall design.
+
+### ASGI servers: Uvicorn, Daphne, Hypercorn
+
+Use an ASGI server when the app needs WebSockets, async streaming, long-lived connections, or an async-first stack. Django supports ASGI, but ordinary synchronous Django pages do not automatically require it.
+
+- **Uvicorn:** popular ASGI server, common with Django/Starlette/FastAPI.
+- **Daphne:** originally associated with Django Channels and WebSockets.
+- **Hypercorn:** ASGI/WSGI server with broader protocol options.
+
+**Important:** ASGI is not a magic speed upgrade. It changes concurrency and operational behavior. Use it because your protocol needs it.
+
+### Docker Compose
+
+Docker Compose describes multi-service environments such as web, database, Redis, worker, and proxy in a versioned file.
+
+**Advantages:** reproducible dependencies; developer/prod parity; useful for teams and multi-service apps.
+
+**Trade-offs:** containers do not replace TLS, backups, security, or operations. They add image builds, registries, volume strategy, and container networking to learn.
+
+### Managed PaaS
+
+A Platform-as-a-Service deploys code/images and usually provides routing, TLS, logs, managed databases, or a built-in deployment pipeline.
+
+**Advantages:** low operational burden, fast first deploy, managed network edge.
+
+**Trade-offs:** cost, platform limits, provider-specific conventions, and still needing migrations/backups/secrets/observability.
+
+### Kubernetes
+
+Kubernetes schedules containers across machines and provides primitives for services, deployments, ingress, configuration, and scaling.
+
+**Advantages:** powerful multi-service/multi-team operations at scale.
+
+**Trade-offs:** substantial complexity. It is not the default answer for a single Django app. Start simpler and move only when operational needs justify it.
+
+## A useful anti-pattern list
+
+Avoid these without a specific reason:
+
+- running `runserver` in production;
+- exposing Gunicorn/Uvicorn directly to the public internet;
+- exposing PostgreSQL port `5432` publicly;
+- choosing Kubernetes only because it sounds professional;
+- putting secrets in Git or Docker images;
+- setting up two reverse proxies for one small site;
+- adding Redis/Celery/containers before the application has a need for them.
+
+---
+
+<!-- Source: foundations/04-variables-and-layout.md -->
+
+# 4. Variables and target layout
+
+Every config in this book uses placeholders. Define them once before editing files.
+
+| Placeholder | Example | Meaning |
+|---|---|---|
+| `<APP_NAME>` | `myproject` | service/directory/database naming prefix |
+| `<PROJECT_PACKAGE>` | `myproject` | Python package containing `settings.py`, `wsgi.py`, `asgi.py` |
+| `<DOMAIN>` | `example.com` | canonical public hostname |
+| `<WWW_DOMAIN>` | `www.example.com` | optional alternate hostname |
+| `<DEPLOY_USER>` | `deploy` | SSH/Git maintenance account |
+| `<APP_USER>` | `myproject` | non-login Linux user that runs Python service |
+| `<DB_NAME>` | `myproject` | PostgreSQL database |
+| `<DB_USER>` | `myproject_db` | PostgreSQL login role |
+
+## Suggested single-VPS layout
 
 ```text
-Client -> Apache (public) -> Gunicorn (private) -> Django
+/srv/<APP_NAME>/
+├── app/               # Git checkout
+├── venv/              # Python virtual environment
+├── staticfiles/       # collectstatic output
+└── media/             # user uploads, if you use local media
+
+/etc/<APP_NAME>/
+├── <APP_NAME>.env     # secrets/environment; not Git
+└── ...                # optional DB service/pass files
+
+/run/<APP_NAME>/       # runtime socket/PID directory created by systemd
+
+/var/backups/<APP_NAME>/
+└── postgresql/        # database dump files, private permissions
 ```
 
-This is different from a forward proxy used by a browser to reach the internet. Apache’s reverse-proxy role is documented around `ProxyPass` and `ProxyPassReverse`. [Apache Proxy]
+## Why use distinct users?
 
-# 3.6 Gunicorn
+A useful split is:
 
-Gunicorn is a Python WSGI server. It imports your Django WSGI application and manages worker processes that handle requests.
+- `<DEPLOY_USER>` owns the Git checkout and runs Git operations.
+- `<APP_USER>` runs Gunicorn/Uvicorn/Django and only needs read access to code plus write access where Django actually writes.
+- `postgres` runs the database service and owns database backups if you use local peer-authenticated backup jobs.
+- `www-data` or the web-server user needs read access to static/media directories only.
 
-**Why not run Django directly:** Django’s development server is not designed as the production process manager. Gunicorn is.
+This is least privilege in practice: a compromised process should not automatically inherit the ability to edit source code, read every secret, or manage the entire server.
 
-**Why bind Gunicorn to `127.0.0.1`:** only Apache on the same machine should reach Gunicorn. The public internet should not see Gunicorn’s port.
+## Naming discipline matters
 
-**What workers mean:** one worker handles one request at a time in the traditional synchronous model. More workers allow concurrency, but too many can exhaust memory. Start conservatively, measure, and tune later.
+Use the same app prefix in service names, directories, database names, backup paths, and log names. A future you should be able to answer “which service owns this file?” from the name alone.
 
-# 3.7 WSGI and ASGI
+---
 
-**WSGI** is the long-established Python interface between web servers/application servers and synchronous Python web applications. A traditional Django website works naturally with WSGI.
+<!-- Source: application/01-repository-and-dependencies.md -->
 
-**ASGI** is a newer asynchronous interface that supports WebSockets and other long-lived async protocols. Django supports both WSGI and ASGI, but you should select ASGI because you need its capabilities, not because it is newer.
+# 5. Repository hygiene and dependencies
 
-Use WSGI/Gunicorn for a normal Django site with forms, admin, REST endpoints, and conventional request/response traffic. Consider ASGI with Uvicorn/Daphne/Hypercorn for WebSockets, live notifications, or async-heavy traffic.
+A production deployment begins before the server exists. The repository should reproduce **code**, not contain production secrets or runtime artifacts.
 
-# 3.8 systemd
-
-systemd is the service manager on modern Ubuntu. It starts services at boot, records logs in the journal, restarts failed services according to rules, and tracks their process trees.
-
-For Gunicorn, systemd answers questions Django cannot answer itself:
-
-- Start the app after server boot.
-- Restart the app after a crash.
-- Run the app as a restricted Linux user.
-- Load protected environment variables.
-- Provide consistent commands: `start`, `stop`, `restart`, `status`, `enable`.
-
-# 3.9 PostgreSQL
-
-PostgreSQL is a relational database server. Django’s ORM sends SQL queries to it. PostgreSQL stores tables, indexes, constraints, transactions, and data durability information.
-
-**Why PostgreSQL instead of SQLite for a public multi-user app:** SQLite is a file database and excellent for local development/small use cases. PostgreSQL is generally the stronger production default when you need concurrent writes, robust user/role control, backups, operations tooling, and predictable behavior under multi-process web traffic.
-
-PostgreSQL itself has users called **roles**. These are not Linux users and not Django `User` rows. They are database identities.
-
-# 3.10 UFW and provider firewall
-
-A firewall controls network traffic by port, protocol, direction, and sometimes source address.
-
-- A **provider firewall/security group** filters traffic before it reaches your VPS.
-- **UFW** configures the Linux host firewall through a simpler interface over the kernel’s packet filtering system. [Ubuntu Firewall]
-
-Use both when possible. They are separate layers.
-
-# 3.11 Certbot and ACME
-
-Let’s Encrypt is a certificate authority. Certbot is an ACME client that proves control over your domain, obtains a certificate, installs or exposes it to your web server, and renews it later.
-
-The validation step is why DNS and firewall configuration must be correct before certificate issuance. For HTTP validation, the CA must reach your domain on port 80.
-
-# 3.12 Git, commits, branches, tags, and releases
-
-- **Commit:** immutable snapshot of code history.
-- **Branch:** named line of development pointing at a commit.
-- **Tag:** stable human-readable label attached to a commit, often used for versions such as `v0.2.0-beta.3`.
-- **Release:** a GitHub presentation layer around a tag, usually with notes and downloadable source archives.
-
-A deployed server should be able to tell you which commit it is running. That is why `git log -1 --oneline` belongs in deployment verification.
-
-<div class="chapter-break"></div>
-
-# Part II - Choose a design deliberately
-
-# 4. Compare the deployment options
-
-There is no single “best” stack. There is a best stack for the application and team you actually have.
-
-| Option | What it is | Advantages | Trade-offs | Good first use case |
-|---|---|---|---|---|
-| Apache + Gunicorn | Apache handles public HTTP; Gunicorn runs Django | Clear separation, strong Apache tooling, easy static serving | Two services to understand | A conventional Django app on Ubuntu |
-| Apache + mod_wsgi | Apache loads Django through mod_wsgi | Fewer moving parts, classic Apache integration | Python/Apache coupling can make environment debugging harder | Existing Apache-first environment |
-| Nginx + Gunicorn | Nginx replaces Apache as reverse proxy | Very common, efficient event-driven proxy | Different configuration vocabulary | Teams already familiar with Nginx |
-| Caddy + Gunicorn | Caddy reverse proxies with automatic HTTPS emphasis | Simple TLS experience | Smaller conventional hosting ecosystem | Small modern service where Caddy fits team knowledge |
-| Nginx/Apache + Uvicorn | ASGI app server path | WebSockets and async protocols | Requires async design discipline | Realtime or WebSocket Django projects |
-| Docker Compose | Package dependencies/services as containers | Repeatability and portability | Adds container/network/volume complexity | Teams who already use containers |
-| Managed PaaS | Provider runs much of the infrastructure | Less operations burden | Cost and platform constraints | Early products prioritizing speed over server control |
-
-## 4.1 Recommended first serious VPS architecture
-
-For a developer who knows Django and basic Linux, this handbook recommends:
+## Minimum repository structure
 
 ```text
-Ubuntu VPS + PostgreSQL + Apache + Gunicorn + systemd + UFW + Certbot
-```
-
-Why this path is strong:
-
-- Every component has a focused role.
-- It maps to Django’s standard WSGI deployment model. [Django Deployment]
-- Apache handles TLS/static files/proxying well.
-- Gunicorn keeps Django in a supervised Python process.
-- PostgreSQL remains private.
-- systemd gives you a real lifecycle manager.
-- The stack is easy to migrate to a new server because code, config, database, and media are clearly separated.
-
-## 4.2 When to use mod_wsgi instead
-
-mod_wsgi integrates Django directly into Apache. It is valid and supported by Django’s deployment docs. [Django Deployment]
-
-Choose it when:
-
-- Your team already knows Apache and mod_wsgi.
-- Your provider’s environment is built around Apache modules.
-- You want one service layer instead of Apache plus Gunicorn.
-
-Avoid mixing it with Gunicorn for the same application URL. Pick one serving path per site.
-
-## 4.3 When ASGI is justified
-
-Use ASGI when you actually need:
-
-- WebSockets / chat / live collaboration.
-- Server-sent event streams with long-lived async handling.
-- An async ecosystem you understand and have tested.
-
-Do not move a stable WSGI site to ASGI only for performance folklore. Application bottlenecks are often database queries, templates, external APIs, or inefficient code rather than WSGI itself.
-
-<div class="chapter-break"></div>
-
-# Part III - Prepare the project locally
-
-# 5. Your repository is a deployable product, not a folder of code
-
-A new server should be able to build a functioning application from the repository plus deliberately injected secrets and data. That means the repository needs a useful structure.
-
-```text
-myapp/
+myproject/
 ├── manage.py
+├── pyproject.toml or requirements.txt
 ├── myproject/
 │   ├── settings.py
 │   ├── urls.py
 │   ├── wsgi.py
 │   └── asgi.py
 ├── web/
-├── requirements.txt
+├── templates/
+├── static/
+├── deploy/                 # public templates/scripts only
+├── docs/
 ├── README.md
 ├── LICENSE
-├── .gitignore
-├── .env.example
-├── deploy/
-│   ├── apache/
-│   ├── systemd/
-│   ├── env/
-│   └── scripts/
-├── docs/
-│   ├── architecture.md
-│   ├── operations.md
-│   └── runbooks.md
-└── .github/
-    ├── workflows/
-    ├── ISSUE_TEMPLATE/
-    └── pull_request_template.md
+├── SECURITY.md
+└── .gitignore
 ```
 
-## 5.1 What belongs in Git
+## What belongs in Git
 
 Commit:
 
-- Django project/app source code.
-- Migrations.
-- Templates and static source files.
-- Dependency definitions.
-- Tests.
-- Deployment **templates** and documentation.
-- A non-secret environment example.
-- CI workflow definitions.
+- source code, templates, migrations, static source files;
+- dependency declaration/lock files;
+- non-secret deployment templates;
+- documentation, tests, CI configuration;
+- `.env.example` with placeholder values.
 
-Do not commit:
+Do **not** commit:
 
-- `.venv/`.
-- Database dumps unless intentionally sanitized example fixtures.
-- `db.sqlite3` for a public production app.
-- User uploads.
-- `staticfiles/` output if it can be regenerated.
-- Real `.env` files.
-- Private certificate keys.
-- API keys, tokens, passwords, or Django `SECRET_KEY`.
+- production `.env` files;
+- `SECRET_KEY`, tokens, private keys, database passwords;
+- virtual environments, `__pycache__`, SQLite production data, generated `staticfiles`, user uploads, socket/PID files;
+- server-specific Apache/Nginx config containing secrets.
 
-## 5.2 A practical `.gitignore`
+## Example `.gitignore`
 
 ```gitignore
 # Python
 __pycache__/
 *.py[cod]
-*.so
 .venv/
 venv/
 
 # Django runtime state
-*.log
+*.sqlite3
 staticfiles/
 media/
-db.sqlite3
 
-# Environment and secrets
+# Secrets
 .env
 .env.*
 !.env.example
-*.pem
-*.key
 
-# Editor/OS files
+# Editor/OS
 .vscode/
 .idea/
 .DS_Store
 ```
 
-## 5.3 Dependency management: why it matters
+## Dependency management choices
 
-Your laptop may have packages installed that your server does not. Dependencies must therefore be declared.
+You need a reproducible answer to “which versions did production run?”
 
-At minimum:
+| Option | Good for | Key point |
+|---|---|---|
+| `requirements.txt` | simple Django projects | pin direct and/or resolved versions deliberately |
+| `pip-tools` | pip workflow with compiled lock files | maintain input requirements and generated lock output |
+| Poetry | projects wanting lockfile + packaging workflow | use `pyproject.toml` and `poetry.lock` |
+| uv | fast modern Python workflow | commit its lock file and document commands |
 
-```bash
-python -m pip freeze > requirements.txt
-```
+The tool matters less than committing the resolved dependency state and using the same file locally, in CI, and in deployment.
 
-For a curated production project, record only direct dependencies in a higher-level file and use a lock/compile process. The rule is simpler than the tooling: **a fresh environment must be able to install exactly what the app needs**.
+## Local pre-deploy quality gate
 
-Example:
-
-```text
-Django==<tested-version>
-psycopg[binary]==<tested-version>
-gunicorn==<tested-version>
-```
-
-Do not add a package version just because someone else’s tutorial uses it. Test it locally first.
-
-## 5.4 Local quality gate before every deployment
-
-Run these before you push:
+Before pushing a release:
 
 ```bash
 python manage.py test
 python manage.py check
-python manage.py check --deploy
+python manage.py check --deploy  # review warnings in production-like settings
 python manage.py makemigrations --check --dry-run
 ```
 
-What each command proves:
+Then inspect Git:
 
-| Command | What it tests | What it does not prove |
-|---|---|---|
-| `test` | Your automated test suite passes in a test database | Real browser behavior or production network setup |
-| `check` | Basic Django configuration consistency | Every code path or external service |
-| `check --deploy` | Additional production-oriented Django warnings | A full security audit |
-| `makemigrations --check --dry-run` | No model change is missing a migration | That the migration is safe on real production data |
-
-## 5.5 Migrations are code that changes data shape
-
-A migration changes database schema/state. It can add a table, add a column, create an index, transform data, or remove a field.
-
-Correct lifecycle:
-
-```text
-local model change
--> make migration locally
--> review migration file
--> run local tests
--> commit migration
--> deploy code
--> run migrate on production
+```bash
+git status --short
+git diff --check
+git log -1 --oneline
 ```
 
-Do **not** routinely run `makemigrations` on production. Production should apply reviewed migrations, not invent them.
+A clean working tree does not prove the app is correct; it proves you know which code you are about to ship.
 
-## 5.6 Add a health endpoint early
+## Migrations are production changes
 
-A health endpoint is a deliberately simple URL used for monitoring and manual checks.
+A migration is code that changes data structure. Treat it as part of the release, not an afterthought.
 
-```python
-# web/views.py
-from django.http import JsonResponse
+- Review generated migrations.
+- Think about table size and locks for large databases.
+- Back up before risky migrations.
+- Have a rollback/forward-fix plan.
+- Never edit a migration that has already been applied to shared production history unless you understand the consequences.
 
+---
 
-def health(request):
-    return JsonResponse({"status": "ok"})
+<!-- Source: application/02-production-settings-and-secrets.md -->
+
+# 6. Production settings and secrets
+
+Django settings are where local development assumptions become explicit production behavior.
+
+## Secrets versus configuration
+
+Configuration answers “how should this deployment behave?” Examples: allowed hosts, whether HTTPS is used, email sender.
+
+Secrets answer “what proves identity or grants access?” Examples: `SECRET_KEY`, DB password, API token, SMTP/App Script token.
+
+Both should usually be supplied through protected environment variables. Only secrets are inherently sensitive, but keeping all deployment-specific values outside the code makes one repository usable across development, staging, and production.
+
+## Minimal environment file
+
+Create a **real** file outside Git, e.g. `/etc/<APP_NAME>/<APP_NAME>.env`:
+
+```dotenv
+DJANGO_SECRET_KEY='replace-with-a-long-random-value'
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=<DOMAIN>,<WWW_DOMAIN>
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<DOMAIN>,https://<WWW_DOMAIN>
+DJANGO_USE_HTTPS=True
+
+POSTGRES_DB=<DB_NAME>
+POSTGRES_USER=<DB_USER>
+POSTGRES_PASSWORD='replace-me'
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+
+DEFAULT_FROM_EMAIL='My Project <noreply@<DOMAIN>>'
 ```
 
-```python
-# myproject/urls.py
-from django.urls import path
-from web.views import health
+Use restrictive ownership/permissions:
 
-urlpatterns = [
-    path("healthz/", health, name="health"),
-]
+```bash
+sudo install -d -o root -g <APP_USER> -m 750 /etc/<APP_NAME>
+sudo install -o root -g <APP_USER> -m 640 /dev/null /etc/<APP_NAME>/<APP_NAME>.env
+sudoedit /etc/<APP_NAME>/<APP_NAME>.env
 ```
 
-A basic health endpoint proves that DNS, TLS, Apache, Gunicorn, Django routing, and response rendering work. A database-aware health endpoint can test the database too, but should be designed carefully so it does not create unnecessary load or expose internal details.
-
-<div class="chapter-break"></div>
-
-# 6. Make Django production-aware
-
-Django does not know whether it is local, staging, or production unless you configure it. The safest pattern is:
-
-- Code contains defaults and parsing logic.
-- A local `.env` can exist only on a developer machine.
-- Production settings come from a protected environment file loaded by systemd.
-
-## 6.1 The settings that matter most
-
-| Setting | What it controls | Why it matters in production |
-|---|---|---|
-| `SECRET_KEY` | Cryptographic signing | Must be secret and stable; rotate if exposed |
-| `DEBUG` | Detailed error pages/debug behavior | Must be `False` publicly |
-| `ALLOWED_HOSTS` | Valid host headers | Prevents unintended host handling |
-| `CSRF_TRUSTED_ORIGINS` | Trusted HTTPS origins for CSRF validation | Required for secure cross-origin/proxy patterns |
-| `DATABASES` | Database connection | Must use protected credentials |
-| `STATIC_ROOT` | Destination of `collectstatic` | Apache serves from here |
-| `MEDIA_ROOT` | User-upload directory | Requires backup and permission planning |
-| `SECURE_SSL_REDIRECT` | Redirect HTTP to HTTPS | Use once HTTPS/proxy handling is correct |
-| secure cookies | Force cookies over HTTPS | Prevents cookie transport over plain HTTP |
-
-Django’s deployment checklist recommends running `manage.py check --deploy` and reviewing production-only settings before release. [Django Checklist]
-
-## 6.2 Example production settings pattern
-
-This is intentionally explicit instead of using hidden convenience packages:
+## Example settings pattern
 
 ```python
-# myproject/settings.py
+# <PROJECT_PACKAGE>/settings.py
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 def env_bool(name: str, default: bool = False) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
+    return os.environ.get(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
 def env_list(name: str, default: str = "") -> list[str]:
-    raw = os.environ.get(name, default)
-    return [item.strip() for item in raw.split(",") if item.strip()]
-
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = env_bool("DJANGO_DEBUG", False)
@@ -587,7 +594,7 @@ DATABASES = {
         "PASSWORD": os.environ["POSTGRES_PASSWORD"],
         "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": int(os.environ.get("POSTGRES_CONN_MAX_AGE", "60")),
+        "CONN_MAX_AGE": 60,
     }
 }
 
@@ -600,508 +607,1001 @@ USE_HTTPS = env_bool("DJANGO_USE_HTTPS", False)
 SECURE_SSL_REDIRECT = USE_HTTPS
 SESSION_COOKIE_SECURE = USE_HTTPS
 CSRF_COOKIE_SECURE = USE_HTTPS
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+REFERRER_POLICY = "same-origin"
+```
 
-# Only needed when a trusted reverse proxy terminates HTTPS and sets this header.
+## Reverse-proxy HTTPS awareness
+
+When Nginx/Apache/Caddy terminates HTTPS and speaks HTTP to Gunicorn, Django otherwise sees the internal hop as HTTP. Set this **only when the proxy reliably sets the header**:
+
+```python
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 ```
 
-### What this code means
+And set the header in the proxy configuration. Misconfiguring this can create redirect loops or cause Django to trust a spoofed header if Gunicorn is publicly reachable. The protection is: bind the app server to `127.0.0.1`/Unix socket and let only your proxy reach it.
 
-- `os.environ[...]` deliberately fails if a mandatory secret is missing. Failing early is better than silently booting with unsafe fallback credentials.
-- `env_bool` prevents the common bug where the non-empty string `"False"` is treated as truthy in Python.
-- `env_list` turns comma-separated values into a Python list.
-- `CONN_MAX_AGE` allows persistent database connections for a limited period; tune later rather than treating it as a magic performance switch.
-- `STATIC_ROOT` is not where you write frontend source files. It is the collected output Apache serves.
-- `SECURE_PROXY_SSL_HEADER` is valid only when Apache controls and sets `X-Forwarded-Proto`. Do not trust this header from arbitrary clients.
+## HSTS comes later
 
-## 6.3 Example `.env.example`
+HSTS tells browsers to prefer HTTPS for a period. Start with `SECURE_HSTS_SECONDS = 0` or omit it until HTTPS, redirects, and all subdomains are proven stable. Then enable a short period first, validate, and increase deliberately. Do not preload/include subdomains casually.
 
-```dotenv
-# Copy to a protected server location; never commit the real file.
-DJANGO_SECRET_KEY='replace-with-a-long-random-value'
-DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=example.com,www.example.com
-DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com,https://www.example.com
-DJANGO_USE_HTTPS=True
+## Security checks
 
-POSTGRES_DB=myapp
-POSTGRES_USER=myapp_db
-POSTGRES_PASSWORD='replace-with-a-unique-password'
-POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
-POSTGRES_CONN_MAX_AGE=60
+Run with production variables loaded:
 
-DEFAULT_FROM_EMAIL='My App <noreply@example.com>'
-SERVER_EMAIL='My App Errors <errors@example.com>'
+```bash
+sudo -u <APP_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py check --deploy
+'
 ```
 
-## 6.4 Static files and media are different
+Warnings are prompts to understand a decision, not instructions to silence everything blindly.
 
-| Type | Examples | Where it originates | Can it be rebuilt? | Backup it? |
-|---|---|---|---|---|
-| Static files | CSS, JS, icons, app images | Your source tree/dependencies | Yes: `collectstatic` | Usually no, if source is committed |
-| Media files | user avatars, uploads, documents | User input at runtime | No | Yes |
+## Line-by-line explanation of the settings pattern
 
-Confusing these creates missing CSS, accidental data loss, or permissions problems.
+This section explains the earlier settings example as if you are seeing production settings for the first time.
 
-<div class="chapter-break"></div>
+```python
+import os
+from pathlib import Path
+```
 
-# Part IV - Publish a project responsibly as open source
+`os` lets Python read environment variables such as `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD`. `Path` gives a clean way to build filesystem paths without hard-coding slash behavior.
 
-# 7. Public code is not automatically open source
+```python
+BASE_DIR = Path(__file__).resolve().parent.parent
+```
 
-A repository made public on GitHub lets people view the code, but without a license it does not clearly grant reuse rights. A real open-source project has an explicit license and documentation that tells people what they may do.
+`__file__` is the current settings file. `resolve()` turns it into an absolute path. `parent.parent` walks up to the project base directory. Django uses `BASE_DIR` later for paths such as static files and media files.
 
-## 7.1 Open-source publication checklist
+```python
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).lower() in {"1", "true", "yes", "on"}
+```
 
-| File / feature | Why it exists | Minimum content |
+Environment variables are strings. Without conversion, the string `"False"` is still truthy in Python. This helper turns common text values into a real boolean. `DJANGO_DEBUG=False` becomes `False`; `DJANGO_DEBUG=true` becomes `True`.
+
+```python
+def env_list(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+```
+
+Some Django settings expect a list. The environment file stores `DJANGO_ALLOWED_HOSTS=example.com,www.example.com` as one string. This helper splits it at commas, trims spaces, and removes empty values.
+
+```python
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+```
+
+Square brackets mean the setting is required. If the environment variable is missing, Django crashes at startup instead of running with an unsafe fake value. That is good. A missing production secret should be loud.
+
+```python
+DEBUG = env_bool("DJANGO_DEBUG", False)
+```
+
+`DEBUG` controls detailed error pages and other development behavior. In production it must be false. The default is false so forgetting the variable does not accidentally expose debug pages.
+
+```python
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+```
+
+Django checks the HTTP `Host` header against this list. If your domain is `example.com`, include `example.com`. If you also serve `www.example.com`, include that too. Do not use `*` in normal production because it disables an important host-header protection.
+
+```python
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+```
+
+This tells Django which HTTPS origins are allowed to submit unsafe requests such as POST forms. Values include the scheme, for example `https://example.com`, not only the hostname.
+
+```python
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ["POSTGRES_DB"],
+        "USER": os.environ["POSTGRES_USER"],
+        "PASSWORD": os.environ["POSTGRES_PASSWORD"],
+        "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        "CONN_MAX_AGE": 60,
+    }
+}
+```
+
+`ENGINE` selects Django's PostgreSQL backend. `NAME`, `USER`, and `PASSWORD` identify the database and role. `HOST=127.0.0.1` means PostgreSQL is on the same server. `PORT=5432` is PostgreSQL's normal TCP port. `CONN_MAX_AGE=60` lets Django reuse a database connection briefly instead of opening a new one for every request.
+
+```python
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+```
+
+`STATIC_URL` is the browser URL prefix. `STATIC_ROOT` is the directory where `collectstatic` gathers CSS, JavaScript, images, and admin assets. Nginx or Apache serves this directory directly.
+
+```python
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+```
+
+Media files are user-uploaded files. They are not the same as static files. They need a backup plan because users create them after deployment.
+
+```python
+USE_HTTPS = env_bool("DJANGO_USE_HTTPS", False)
+SECURE_SSL_REDIRECT = USE_HTTPS
+SESSION_COOKIE_SECURE = USE_HTTPS
+CSRF_COOKIE_SECURE = USE_HTTPS
+```
+
+These settings switch on HTTPS behavior when the deployment is ready. `SECURE_SSL_REDIRECT` redirects HTTP to HTTPS. The cookie settings tell browsers to send session/CSRF cookies only over HTTPS.
+
+```python
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+REFERRER_POLICY = "same-origin"
+```
+
+These are browser security headers. They reduce common classes of mistakes: MIME sniffing, clickjacking, and leaking full referrer URLs across sites.
+
+## Why the environment file is outside Git
+
+A Git repository is copied to laptops, CI systems, GitHub, backups, and sometimes forks. Secrets do not belong there. The application code should say, "I need `POSTGRES_PASSWORD`." The server environment should supply the actual value.
+
+This separation lets you run the same code in multiple places:
+
+| Environment | Same code? | Different values? |
 |---|---|---|
-| `README.md` | Explains what the project is and how to start | purpose, screenshots, prerequisites, install, run, test, deploy overview |
-| `LICENSE` | Defines legal permission to use/modify/distribute | chosen full license text |
-| `CONTRIBUTING.md` | Makes contributions predictable | setup, tests, style, branch/PR expectations |
-| `CODE_OF_CONDUCT.md` | Defines community behavior expectations | adopted code of conduct and reporting path |
-| `SECURITY.md` | Gives a private vulnerability reporting route | supported versions, contact, disclosure expectations |
-| `CHANGELOG.md` | Records user-facing changes | release date/version/fixes/features |
-| `.env.example` | Shows required configuration without leaking secrets | variable names and safe placeholders |
-| issue templates | Improve bug reports and feature requests | reproduction steps, expected/actual behavior, environment |
-| pull request template | Makes review easier | summary, tests, migration/security notes |
-| CI workflow | Validates code consistently | tests/checks on push and pull request |
+| local development | yes | local database, debug true |
+| staging | yes | staging domain, staging secrets |
+| production | yes | production domain, production secrets |
 
-GitHub’s community profile checks for several community-health files, including README, license, code of conduct, and contribution guidelines. [GitHub Community]
+If a secret leaks, rotate the secret. Do not only delete it from the latest commit; Git history may still contain it.
 
-## 7.2 License choice, explained simply
+---
 
-This is not legal advice, but these are common practical choices:
+<!-- Source: application/03-static-media-migrations-health.md -->
 
-| License | Basic intent | Choose it when | Main trade-off |
+# 7. Static files, media, migrations, and health checks
+
+## Static files and media are not the same
+
+| Type | Examples | Source of truth | Production strategy |
 |---|---|---|---|
-| MIT | Very permissive | You want simple broad reuse | Others can use it in proprietary products |
-| Apache-2.0 | Permissive with explicit patent terms | You want a business-friendly permissive license with patent language | Slightly longer/more formal |
-| GPLv3 | Strong copyleft for distributed derivatives | You want distributed modified versions to remain GPL | Some companies avoid GPL dependencies |
-| AGPLv3 | Network copyleft | You want hosted modified versions to provide source to users | Strongest adoption restriction in this table |
+| Static files | CSS, JavaScript, logos shipped with code | Git repository | `collectstatic`, then serve directly via proxy/web server |
+| Media files | user uploads, avatars, attachments | runtime data | persistent storage and backup; often object storage later |
 
-Do not copy a random license header from another project. Choose deliberately. When in doubt for a small learning/project repository, MIT or Apache-2.0 are common permissive choices; consult legal advice for commercial or sensitive projects.
+`collectstatic` gathers app-level static source into `STATIC_ROOT`. It does **not** handle user uploads and it does not replace a web server.
 
-## 7.3 README structure that actually helps people
-
-```markdown
-# Project Name
-
-One sentence: what it does and who it is for.
-
-## Features
-- ...
-
-## Quick start
-- prerequisites
-- clone
-- virtualenv
-- install dependencies
-- create local environment file
-- migrate
-- run server
-
-## Configuration
-List variables from `.env.example`; do not publish values.
-
-## Testing
-Commands for unit/integration/browser tests.
-
-## Production deployment
-Point to `docs/deployment.md`; do not hide deployment knowledge in chat history.
-
-## Contributing
-Link to `CONTRIBUTING.md`.
-
-## Security
-Link to `SECURITY.md`.
-
-## License
-State the selected license.
-```
-
-## 7.4 Security policy
-
-A `SECURITY.md` tells researchers how to report a problem privately instead of opening a public issue with exploit details.
-
-```markdown
-# Security Policy
-
-## Supported versions
-Only the latest release on the `main` branch is currently supported.
-
-## Reporting a vulnerability
-Please do not open a public issue for a suspected vulnerability.
-Email security@example.com with:
-- affected version or commit
-- reproduction steps
-- impact
-- suggested mitigation, if known
-
-We aim to acknowledge reports within 7 days and provide a status update within 14 days.
-```
-
-GitHub supports repository security policies and private vulnerability reporting/advisories for public projects. [GitHub Security Policy]
-
-## 7.5 Secret safety for public repositories
-
-Before publishing a repository:
+## Run collectstatic deliberately
 
 ```bash
-# Search current tracked files for suspicious names/values.
-git grep -nEi 'secret|password|token|api[_-]?key|private[_-]?key' || true
-
-# Confirm ignored secret files are not tracked.
-git ls-files | grep -E '(^|/)(\.env|.*\.pem|.*\.key)$' || true
+sudo -u <APP_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py collectstatic --noinput
+'
 ```
 
-Also inspect Git history. Removing a secret from the latest file does not remove it from earlier commits. A leaked credential should be rotated, even if you later delete the commit or repository. GitHub’s secret scanning and push protection are useful additional controls, but they do not replace careful handling. [GitHub Secret Safety]
+Run it when static sources or static settings change. You do not need it for an ordinary Python-only fix.
 
-## 7.6 Release tags and Semantic Versioning
-
-A version such as `v0.2.0-beta.3` identifies a specific code snapshot. The `beta.3` suffix signals that the future `0.2.0` release remains unstable and is being tested.
-
-Basic convention:
-
-```text
-v0.2.0-beta.1  first testing snapshot
-v0.2.0-beta.2  same future version, later beta fixes
-v0.2.0         stable release
-v0.2.1         compatible bug-fix release
-v0.3.0         compatible new feature release while major version is 0
-v1.0.0         first declared stable public API/release
-```
-
-A pre-release has lower precedence than the corresponding final release under Semantic Versioning. [SemVer]
-
-Do not move old tags just because you created a newer release. A tag should remain an honest record of the code that was released at that time.
-
-<div class="chapter-break"></div>
-
-# Part V - Build the server from zero
-
-# 8. Establish names and target layout
-
-Choose names once and use them consistently. This handbook uses placeholders:
-
-```text
-APP_NAME       = myapp
-PROJECT_NAME   = myproject
-DOMAIN         = example.com
-WWW_DOMAIN     = www.example.com
-DEPLOY_USER    = deploy
-APP_USER       = myapp
-DB_NAME        = myapp
-DB_USER        = myapp_db
-GUNICORN_PORT  = 8001
-REPO_URL       = https://github.com/your-account/your-repository.git
-```
-
-Target filesystem layout:
-
-```text
-/srv/myapp/
-├── app/            # Git checkout, editable by deploy user
-├── venv/           # Python virtual environment
-├── staticfiles/    # generated by collectstatic
-└── media/          # persistent user uploads
-
-/etc/myapp/
-└── myapp.env       # real environment variables/secrets; never in Git
-
-/var/backups/myapp/
-└── postgresql/     # local DB archives
-
-/etc/systemd/system/
-└── myapp-gunicorn.service
-
-/etc/apache2/sites-available/
-└── myapp.conf
-```
-
-## 8.1 Two Linux identities, two responsibilities
-
-| User | Purpose | Should have SSH login? | Should run Gunicorn? | Should have broad sudo? |
-|---|---|---:|---:|---:|
-| `deploy` | Human operator who pulls approved code | Yes | No | Limited/admin only |
-| `myapp` | Noninteractive service account | No | Yes | No |
-
-Why separate them:
-
-- A web process should not have your human deployment privileges.
-- A human account should not automatically become the application runtime identity.
-- File permissions become clearer: deploy writes code; the app reads code; only the app writes runtime media.
-
-# 9. First login and safe package baseline
-
-Start as root only long enough to create a non-root admin account. Keep one root/recovery path through your provider console in case you make an SSH mistake.
+## Migrations
 
 ```bash
-apt update
-apt upgrade
-apt install -y sudo curl git ca-certificates
-
-adduser deploy
-usermod -aG sudo deploy
+sudo -u <APP_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py migrate --noinput
+'
 ```
 
-**What these do:**
+Run it only when a new migration is part of the release. It is safe to include in a standard runbook for small apps, but understand that large or complex migrations can lock tables or take time.
 
-- `apt update` refreshes package metadata.
-- `apt upgrade` applies available updates to installed packages.
-- `sudo` allows controlled elevation from the deploy account.
-- `git` is the code transport mechanism.
-- `ca-certificates` enables HTTPS certificate verification for tools such as Git and package managers.
+## Add a tiny health endpoint
 
-Before disabling root/password login, verify you can open a **second** terminal and authenticate as `deploy` with a working SSH key. Never lock down the only active SSH session first.
+A health endpoint gives monitors and operators a stable request to test. Keep it simple; do not expose secrets or expensive queries.
 
-## 9.1 SSH keys and hardening
+```python
+# web/views.py
+from django.http import JsonResponse
 
-A public key is placed on the server; the matching private key remains on your computer. This is stronger and more manageable than ordinary password login when configured correctly.
+def healthz(request):
+    return JsonResponse({"status": "ok"})
+```
 
-After verifying key login in a second session, create a hardening drop-in:
+```python
+# <PROJECT_PACKAGE>/urls.py
+from django.urls import path
+from web.views import healthz
+
+urlpatterns = [
+    path("healthz/", healthz, name="healthz"),
+]
+```
+
+A deeper readiness check may test database connectivity, but distinguish it from a lightweight liveness check. A health page that always queries external APIs can create an outage amplifier.
+
+## Production smoke test
+
+After deployment, verify:
 
 ```bash
-sudo tee /etc/ssh/sshd_config.d/99-myapp-hardening.conf >/dev/null <<'EOF'
+curl -fsS https://<DOMAIN>/healthz/
+curl -I https://<DOMAIN>/
+```
+
+Then exercise one critical authenticated path manually or with browser automation: login, create/update a representative record, and inspect the expected response.
+
+---
+
+<!-- Source: application/04-wsgi-and-asgi.md -->
+
+# 8. WSGI and ASGI explained
+
+Django exposes two entry points in a default project:
+
+```text
+<PROJECT_PACKAGE>/wsgi.py
+<PROJECT_PACKAGE>/asgi.py
+```
+
+They are interfaces, not alternative copies of your application.
+
+## WSGI
+
+WSGI is the traditional Python web-server gateway interface. It fits normal request/response Django applications: HTML pages, REST APIs, forms, admin, and most CRUD workloads.
+
+Typical WSGI app servers:
+
+- Gunicorn
+- uWSGI
+- Apache mod_wsgi
+
+Use WSGI when your application does not require WebSockets or other long-lived async protocols.
+
+## ASGI
+
+ASGI supports asynchronous protocols and long-lived connections in addition to ordinary HTTP.
+
+Typical ASGI servers:
+
+- Uvicorn
+- Daphne
+- Hypercorn
+
+Use ASGI when you need one or more of these:
+
+- WebSockets (chat, collaborative editing, live dashboards),
+- server-sent events or streaming patterns,
+- async integrations that benefit from non-blocking I/O,
+- Django Channels or another ASGI-native component.
+
+## What async does not change
+
+ASGI does not remove the need for:
+
+- a reverse proxy/TLS layer,
+- private databases,
+- environment variables and secrets,
+- systemd/containers for process supervision,
+- backups, monitoring, tests, and security headers.
+
+It also does not automatically make blocking ORM work “async.” Design and measure before changing the whole stack for performance reasons.
+
+## The simple rule
+
+Start with WSGI/Gunicorn for a conventional Django site. Adopt ASGI because a feature needs it, not because it is newer.
+
+---
+
+<!-- Source: application/05-email-background-work.md -->
+
+# 9. Email, background work, cache, and external services
+
+A Django deployment is more than HTTP requests. Many applications send email, call third-party APIs, generate files, process images, or calculate reports.
+
+## Email delivery choices
+
+| Method | Advantages | Trade-offs |
+|---|---|---|
+| SMTP provider | familiar Django configuration | credentials, provider port/rate limits, deliverability setup |
+| Transactional email API | explicit HTTP API, often strong delivery tooling | vendor SDK/API key dependency |
+| Cloud email service | good scale/integration in cloud environments | provider-specific IAM/domain configuration |
+| Development console backend | safe local inspection | does not deliver real email |
+
+Never hard-code SMTP passwords/API tokens in `settings.py`. Use environment variables. In production, set `DEFAULT_FROM_EMAIL`, configure domain authentication (SPF/DKIM/DMARC) according to the provider, and send a real test email before launch.
+
+## Do not make slow work block an HTTP request
+
+A web request should finish promptly. For expensive or unreliable work, use a queue/worker model:
+
+```text
+Django request
+  → records intent / queues task
+  → returns response
+  → worker performs email/report/image/API work
+```
+
+Common tools:
+
+| Tool | Typical fit |
+|---|---|
+| Celery | mature distributed task queue; Redis/RabbitMQ broker |
+| RQ | simpler Redis-backed job queue |
+| Huey | lightweight queue/scheduler option |
+| Django-Q / alternatives | project-dependent workflow choices |
+
+Every queue adds operational responsibilities: broker access, worker service, retries, idempotency, observability, and graceful failure. Add one when work genuinely should not occur inside the request lifecycle.
+
+## Caching
+
+Cache repeated expensive work only after measuring a real bottleneck. Common patterns:
+
+- CDN/browser cache for static assets;
+- per-view cache for public pages;
+- Redis cache for expensive computed results;
+- database indexes/pagination before adding cache layers.
+
+Caching is a correctness feature as much as a performance feature: decide when cache entries expire and who is allowed to see them. Never cache authenticated/private responses accidentally.
+
+## External APIs
+
+- Set explicit timeouts; default infinite waits can exhaust workers.
+- Handle failure and retry deliberately.
+- Keep provider tokens in protected environment variables.
+- Use background tasks for slow/retryable integration work.
+- Record which external dependency failed in logs without logging secrets.
+
+## Celery and Redis production shape
+
+A common Django queue architecture is:
+
+```text
+Django web process
+  -> Redis or RabbitMQ broker
+  -> Celery worker
+  -> database/object storage/email/API
+  -> Celery beat for scheduled tasks when needed
+```
+
+Run workers as separate systemd services or separate containers. Do not hide workers inside the web process. They need independent restart policy, logs, deployment steps, and health checks.
+
+Production rules for tasks:
+
+- make tasks idempotent where practical;
+- set time limits for jobs that can hang;
+- use retries with backoff for transient failures;
+- store enough task context to debug without storing secrets;
+- monitor queue length and worker failures;
+- decide what happens when the broker is down.
+
+## Sessions and storage backends
+
+If you run more than one web process or server, state must not live only in process memory. Use database, cache, signed-cookie, or another deliberate session backend. For uploads, prefer a durable media strategy: local disk for a single VPS with backups, or S3-compatible object storage when multiple servers or CDN delivery are required.
+
+Object storage changes behavior: permissions, signed URLs, lifecycle rules, cache headers, backup expectations, and local development settings all need documentation.
+
+## Scheduled tasks
+
+Scheduled jobs can run through cron, systemd timers, Celery beat, Huey, provider schedulers, or CI/manual workflows. Choose one owner per job. Duplicate schedulers can send duplicate emails, charge customers twice, or corrupt generated reports.
+
+Document each scheduled task with:
+
+- command/task name;
+- schedule and timezone;
+- expected duration;
+- retry behavior;
+- success/failure alert;
+- whether it is safe to run twice.
+
+---
+
+<!-- Source: server/01-vps-dns-provider.md -->
+
+# 10. VPS, Ubuntu, DNS, and provider controls
+
+## VPS responsibilities
+
+A VPS is a virtual machine rented from a provider. It gives you a public IP, CPU, memory, disk, and an operating system. In return, you own the operating responsibility: patches, network policy, secrets, backups, logs, and recovery.
+
+A managed platform reduces some of this responsibility. It does not eliminate application configuration, migrations, data backups, or access control.
+
+## Before deployment: where the app actually runs
+
+A beginner-friendly production path usually looks like this:
+
+```text
+Your laptop
+  -> Git repository
+  -> VPS or platform
+  -> public internet
+```
+
+The laptop is where you write code and run tests. Git is the transport and history system. The VPS is the always-on computer that runs the application, database, web server, background workers, and scheduled jobs. The internet reaches the VPS through a public IP address and DNS name.
+
+Common hosting choices:
+
+| Option | Best fit | Responsibility level |
+|---|---|---|
+| VPS | learning, small products, full control | high: OS, firewall, backups, services |
+| Dedicated server | predictable heavy workloads | very high: hardware/provider coordination too |
+| PaaS | teams that want less server administration | medium: app config, data, vendor limits |
+| Managed database + app VPS | growing apps with valuable data | medium-high: app server plus database contract |
+| Kubernetes | many services, platform team, container orchestration | very high unless managed and justified |
+
+Choose the smallest boring server that can run the app comfortably, then document how to resize or migrate. For a modest Django app, 1-2 vCPU, 1-2 GB RAM, and SSD storage is often enough to start if PostgreSQL and background workers are not heavy. Watch memory and disk before upgrading CPU.
+
+## DNS before certificates
+
+For a normal public TLS certificate, the domain must resolve to the server that will answer the validation challenge.
+
+Create DNS records first:
+
+```text
+A     <DOMAIN>       → <SERVER_IPV4>
+A     <WWW_DOMAIN>   → <SERVER_IPV4>  # optional
+```
+
+Verify from a resolver:
+
+```bash
+dig +short <DOMAIN>
+dig +short <WWW_DOMAIN>
+```
+
+DNS is only a name-to-address system. It does not proxy traffic unless you deliberately enable a CDN/proxy service. A CDN can add caching, DDoS controls, and TLS termination, but it introduces another layer whose origin connection must be configured and tested.
+
+## IP addresses and DNS records
+
+A public IP address identifies the server on the internet. A private IP address is reachable only inside a private network. A domain is just a human name until DNS records point it somewhere.
+
+Useful records:
+
+| Record | Purpose | Example use |
+|---|---|---|
+| A | hostname to IPv4 address | `example.com -> 203.0.113.10` |
+| AAAA | hostname to IPv6 address | `example.com -> 2001:db8::10` |
+| CNAME | hostname alias to another hostname | `www -> example.com` |
+| MX | mail routing | receiving email for the domain |
+| TXT | verification and email policy | SPF, DKIM, DMARC, provider checks |
+
+Set DNS TTLs deliberately. A short TTL can help during migration, but it does not make every resolver update instantly. Plan DNS changes before certificate issuance, launch windows, and provider migrations.
+
+## Provider firewall versus UFW
+
+Use two boundaries:
+
+1. **Provider firewall/security group** — filters before traffic reaches the VPS.
+2. **UFW host firewall** — filters on the Linux host.
+
+For a simple web app, allow only:
+
+```text
+TCP 22    SSH administration
+TCP 80    HTTP redirect and ACME validation
+TCP 443   HTTPS application traffic
+```
+
+Do not open:
+
+```text
+5432  PostgreSQL
+8000  Django development server
+8001  Gunicorn/Uvicorn app server
+6379  Redis
+```
+
+unless you have an explicit private-network architecture and source-IP restrictions.
+
+## The network path in production
+
+For a classic single-server deployment, the request path is:
+
+```text
+Browser
+  -> DNS lookup
+  -> public IP address
+  -> provider firewall
+  -> UFW on the VPS
+  -> TCP port 443
+  -> Nginx/Apache/Caddy
+  -> Unix socket or localhost TCP port
+  -> Gunicorn/Uvicorn
+  -> Django
+  -> PostgreSQL on localhost/private network
+```
+
+Key terms:
+
+| Term | Meaning in deployment |
+|---|---|
+| TCP | transport protocol used by HTTP(S), SSH, PostgreSQL, Redis, and many APIs |
+| port | numbered entry point on an IP address, such as 22, 80, 443, 5432 |
+| socket | endpoint for process communication; can be TCP or Unix file socket |
+| localhost | the same machine, usually `127.0.0.1` or `::1` |
+| public IP | routable from the internet |
+| private IP | reachable only inside a private network/VPC/LAN |
+| NAT | address translation between private networks and public routes |
+| proxy | server that receives a request and forwards it to another service |
+| CDN | edge network that can cache, proxy, and protect public traffic |
+
+When debugging, move along this path one layer at a time. Do not start by changing Django settings if DNS does not resolve, port 443 is blocked, or the proxy cannot reach the app server.
+
+## Start with an LTS release
+
+Use a supported Ubuntu LTS release and apply security updates. Record the OS release and provider details in private operations documentation so a future migration is reproducible.
+
+## Provider controls to record
+
+Keep a private operations note for each production server:
+
+- provider and region;
+- server size and disk size;
+- public IPv4/IPv6 addresses;
+- private network/VPC name if used;
+- firewall/security group rules;
+- DNS provider and authoritative nameservers;
+- backup/snapshot settings;
+- emergency access method.
+
+This documentation matters during incidents. If the original deployer is unavailable, another maintainer should know where the server lives and which control panels can affect it.
+
+---
+
+<!-- Source: server/02-ssh-users-permissions.md -->
+
+# 11. SSH, users, permissions, and directories
+
+## First login baseline
+
+```bash
+sudo apt update
+sudo apt upgrade
+sudo apt install -y git curl ca-certificates build-essential python3 python3-venv python3-pip
+```
+
+Do not apply a firewall lockout from a fragile connection. Keep one working SSH session open while testing another.
+
+## Use SSH keys before disabling passwords
+
+On your local machine:
+
+```bash
+ssh-keygen -t ed25519 -C "your-email@example.com"
+ssh-copy-id <DEPLOY_USER>@<SERVER_IP>
+```
+
+Test a second SSH login using the key. Only then consider hardening `/etc/ssh/sshd_config.d/99-hardening.conf`:
+
+```text
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
-AllowUsers deploy
-EOF
+```
 
+Validate and reload carefully:
+
+```bash
 sudo sshd -t
 sudo systemctl reload ssh
 ```
 
-**Line-by-line meaning:**
+Do not close the original session until a fresh key-based session succeeds.
 
-- `PermitRootLogin no`: root cannot log in over SSH.
-- `PasswordAuthentication no`: prevents password guessing over SSH.
-- `KbdInteractiveAuthentication no`: disables another interactive password pathway.
-- `PubkeyAuthentication yes`: permits SSH keys.
-- `AllowUsers deploy`: only the listed account may use SSH. Add every genuinely required SSH account before enabling it.
+## Create identities
 
-> **Safety rule:** Do not apply this until key login is proven from another terminal. `sshd -t` validates syntax before you reload the service.
+```bash
+sudo adduser <DEPLOY_USER>
+sudo usermod -aG sudo <DEPLOY_USER>
 
-## 9.2 Install runtime packages
+sudo adduser --system --group --home /srv/<APP_NAME> --shell /usr/sbin/nologin <APP_USER>
+```
+
+`<DEPLOY_USER>` is a human/operator account. `<APP_USER>` is a non-login service identity that runs the Python application.
+
+## Create directories
+
+```bash
+sudo install -d -o <DEPLOY_USER> -g <APP_USER> -m 750 /srv/<APP_NAME>
+sudo install -d -o <DEPLOY_USER> -g <APP_USER> -m 750 /srv/<APP_NAME>/app
+sudo install -d -o <APP_USER> -g www-data -m 2750 /srv/<APP_NAME>/staticfiles
+sudo install -d -o <APP_USER> -g www-data -m 2750 /srv/<APP_NAME>/media
+```
+
+The setgid bit in `2750` helps new files inherit the directory group. Adjust only based on actual access needs.
+
+## Understand permissions
+
+For `750`:
+
+```text
+owner: read/write/enter
+ group: read/enter
+other: no access
+```
+
+Files containing secrets should commonly be `640` or stricter. Runtime files should not be world-writable. Avoid `chmod 777`; it hides an ownership design problem rather than solving it.
+
+## Clone application code
+
+Run Git as the deploy user, not root:
+
+```bash
+sudo -u <DEPLOY_USER> -H bash -lc '
+cd /srv/<APP_NAME>
+git clone <REPOSITORY_URL> app
+python3 -m venv /srv/<APP_NAME>/venv
+/srv/<APP_NAME>/venv/bin/pip install --upgrade pip
+/srv/<APP_NAME>/venv/bin/pip install -r app/requirements.txt
+'
+```
+
+Then grant the app service read/execute access to code without making it the repository owner:
+
+```bash
+sudo chgrp -R <APP_USER> /srv/<APP_NAME>/app
+sudo chmod -R g+rX /srv/<APP_NAME>/app
+```
+
+Adapt this rule if your deployment user needs to keep exclusive ownership; the principle is that application code should be readable by the runtime user, while Git operations remain controlled.
+
+## What the first package commands do
 
 ```bash
 sudo apt update
-sudo apt install -y \
-  python3 python3-venv python3-pip python3-dev \
-  postgresql postgresql-contrib libpq-dev \
-  apache2 certbot python3-certbot-apache \
-  ufw fail2ban unattended-upgrades
 ```
 
-Why these packages exist:
+This downloads the latest package index from Ubuntu repositories. It does not upgrade software by itself; it refreshes the server's knowledge of available versions.
 
-| Package | Purpose |
+```bash
+sudo apt upgrade
+```
+
+This applies available upgrades. On a new server, run it early so you are not building on stale packages.
+
+```bash
+sudo apt install -y git curl ca-certificates build-essential python3 python3-venv python3-pip
+```
+
+This installs the basic tools the deployment needs:
+
+| Package | Why it is installed |
 |---|---|
-| `python3` | Python interpreter |
-| `python3-venv` | isolated Python environment support |
-| `python3-pip` | Python package installer |
-| `python3-dev` / `libpq-dev` | build headers for some Python/database dependencies |
-| `postgresql` | database server |
-| `postgresql-contrib` | useful PostgreSQL extensions/tools |
-| `apache2` | public web server and reverse proxy |
-| `certbot` / Apache plugin | TLS certificate issuance and renewal integration |
-| `ufw` | simple host firewall management |
-| `fail2ban` | temporary bans after repeated failed authentication patterns |
-| `unattended-upgrades` | optional automated security update support |
+| `git` | downloads and updates your source code |
+| `curl` | tests HTTP endpoints from the terminal |
+| `ca-certificates` | lets tools trust public HTTPS certificates |
+| `build-essential` | compiles Python packages that need native extensions |
+| `python3` | runs Python |
+| `python3-venv` | creates an isolated virtual environment |
+| `python3-pip` | installs Python packages |
 
-<div class="chapter-break"></div>
+The `-y` flag answers yes to the install prompt. Use it only when you understand the package list.
 
-# 10. Create service users and directories
+## Why there are two Linux users
 
-Create the noninteractive application identity:
+A common beginner mistake is to run everything as `root` because it avoids permission errors. That works until a bug, stolen key, or bad command has unlimited power.
 
-```bash
-sudo adduser --system --group --home /srv/myapp --shell /usr/sbin/nologin myapp
-```
+This guide separates identities:
 
-Meaning:
+| Identity | Job | Should it log in by SSH? |
+|---|---|---|
+| `<DEPLOY_USER>` | human deploys code and runs admin commands with sudo | yes |
+| `<APP_USER>` | systemd runs Django/Gunicorn with limited permissions | no |
+| `www-data` | Nginx/Apache reads public files | no |
+| `postgres` | PostgreSQL administration role on the OS | no normal app login |
 
-- `--system`: create a system account, not a normal human account.
-- `--group`: create a matching Linux group.
-- `--home`: records a logical app home.
-- `--shell /usr/sbin/nologin`: prevents interactive shell login.
+The app user should be able to read code and write only what the app truly needs, such as local media if you use local media storage. It should not own your whole server.
 
-Create directories:
+## Understanding the `install -d` directory commands
 
 ```bash
-sudo install -d -o deploy -g myapp -m 2750 /srv/myapp
-sudo install -d -o deploy -g myapp -m 2750 /srv/myapp/app
-sudo install -d -o deploy -g myapp -m 2750 /srv/myapp/venv
-sudo install -d -o myapp -g www-data -m 2755 /srv/myapp/staticfiles
-sudo install -d -o myapp -g www-data -m 2750 /srv/myapp/media
-sudo install -d -o root -g myapp -m 0750 /etc/myapp
-sudo install -d -o postgres -g postgres -m 0700 /var/backups/myapp/postgresql
+sudo install -d -o <DEPLOY_USER> -g <APP_USER> -m 750 /srv/<APP_NAME>/app
 ```
 
-## 10.1 Read the permission numbers
+Read it piece by piece:
 
-Linux permission modes use three groups: owner, group, everyone else.
+| Piece | Meaning |
+|---|---|
+| `sudo` | run with administrator privileges |
+| `install -d` | create a directory with exact ownership and permissions |
+| `-o <DEPLOY_USER>` | make the deploy user the owner |
+| `-g <APP_USER>` | make the app user group the group owner |
+| `-m 750` | owner can read/write/enter; group can read/enter; others get no access |
+| `/srv/<APP_NAME>/app` | the target directory for the application repository |
+
+This is more precise than `mkdir` followed by several `chown` and `chmod` commands.
+
+## Why `g+rX` is used for code
+
+```bash
+sudo chmod -R g+rX /srv/<APP_NAME>/app
+```
+
+`g+rX` means "give the group read permission, and give execute permission only to directories and already-executable files." Directories need execute permission so a process can enter them. Normal Python files need read permission, not execute permission.
+
+This lets `<APP_USER>` import Python code without making every file executable.
+
+---
+
+<!-- Source: server/03-postgresql.md -->
+
+# 12. PostgreSQL: the private data layer
+
+PostgreSQL is a relational database server. Django’s ORM translates model operations into SQL, while PostgreSQL handles durable storage, transactions, concurrent access, indexes, constraints, and backups.
+
+## Why PostgreSQL instead of SQLite in production?
+
+SQLite is excellent for local prototypes and small single-process projects. PostgreSQL is a more appropriate default for a multi-user production web application because it handles concurrent writes, roles, backups, transactions, and operational tooling more predictably.
+
+## Install packages
+
+```bash
+sudo apt install -y postgresql postgresql-contrib libpq-dev
+```
+
+## Create a dedicated database and role
+
+```bash
+sudo -u postgres psql
+```
+
+Inside PostgreSQL:
+
+```sql
+CREATE ROLE <DB_USER> LOGIN PASSWORD 'use-a-unique-long-password';
+CREATE DATABASE <DB_NAME> OWNER <DB_USER>;
+\q
+```
+
+Do not use the `postgres` superuser as your Django database user. The application role should own only what it needs.
+
+## Keep PostgreSQL private
+
+For a single-VPS deployment, Django and PostgreSQL communicate locally. Do not add a public UFW rule for port 5432. Do not bind PostgreSQL to public interfaces unless you have a private-network database architecture, TLS, source restriction, and a documented reason.
+
+## Authentication and `pg_hba.conf`
+
+PostgreSQL has two separate controls: roles inside the database server and connection rules in `pg_hba.conf`. A role may exist, but a connection can still be rejected if the host, database, user, or authentication method is not allowed.
+
+For a single-VPS deployment, prefer local connections. Keep `listen_addresses` limited to localhost unless you intentionally use a private database network. If you edit PostgreSQL configuration, reload the service and verify with a real Django connection rather than assuming the file is correct.
+
+```bash
+sudo systemctl reload postgresql
+sudo -u <APP_USER> -H bash -lc 'cd /srv/<APP_NAME>/app && /srv/<APP_NAME>/venv/bin/python manage.py dbshell'
+```
+
+## Least-privilege roles
+
+The Django role usually owns the application database and should not be a PostgreSQL superuser. For larger teams, create separate roles for:
+
+| Role | Purpose |
+|---|---|
+| app role | Django runtime migrations and queries |
+| read-only role | analytics or support inspection |
+| backup role | dump/replication privileges as needed |
+| admin role | controlled maintenance, not used by the app |
+
+Store each credential separately. Do not share the app role password with dashboards, notebooks, or ad hoc scripts.
+
+## Connection pooling
+
+Each Gunicorn/Uvicorn worker can hold database connections. Background workers and management commands add more. If traffic grows, PostgreSQL can run out of connections before CPU is saturated.
+
+Options:
+
+- keep Django `CONN_MAX_AGE` modest and measure connection count;
+- tune web worker counts based on memory and database capacity;
+- add PgBouncer when connection churn or count becomes a real limit;
+- use a managed database pooler if your provider offers one.
+
+Connection pooling is not a substitute for slow-query fixes. Indexes, pagination, and query shape still matter.
+
+## Backups and restore testing
+
+A backup that has never been restored is only a guess. Test restoration into a separate database before you need it during an incident.
+
+Minimum practice:
 
 ```text
-7 = read + write + execute
-5 = read + execute
-4 = read
-0 = no access
+Nightly logical dump
+  -> compressed file
+  -> off-server storage
+  -> retention policy
+  -> scheduled restore drill
 ```
 
-Directories need the execute bit to be entered/traversed. `2750` also sets the setgid bit, helping new files inherit the directory group. Permissions are not a decoration: they decide whether Apache can read assets, whether Gunicorn can write media, and whether another local account can read secrets.
+Record the PostgreSQL version, dump command, restore command, encryption method if used, retention window, and the last successful restore test date.
 
-**Important:** exact ownership must fit your app’s behavior. Do not use `chmod -R 777` as a “fix.” It hides the ownership model and creates unnecessary write access.
+## Migrations in production
 
-# 11. Clone code and create the virtual environment
+Treat migrations as code, but remember they change data structures. Before deploying risky migrations, ask:
 
-Run Git and Python environment work as `deploy`, not root:
+- Does this lock a large table?
+- Can old code and new code run during the transition?
+- Is there a data backfill, and can it run in batches?
+- Is rollback a code rollback, a reverse migration, or a restore?
+- Has this migration run against staging data of realistic size?
+
+For large systems, use expand-and-contract migrations: add nullable/new structures first, deploy compatible code, backfill safely, then remove old structures later.
+
+## Basic tuning signals
+
+Do not copy random tuning values. Start by measuring:
+
+| Signal | What it may indicate |
+|---|---|
+| slow queries | missing indexes, inefficient ORM patterns, too much data per request |
+| high connection count | too many workers, missing pooling, long transactions |
+| disk growth | missing retention, large uploads in DB, audit/log tables |
+| high I/O wait | storage bottleneck, inefficient queries, undersized server |
+| lock waits | migration/table lock, long transaction, concurrent writes |
+
+Add indexes with migrations, verify query plans when needed, and keep database monitoring close to deployment history.
+
+## Verify Django connection
+
+After environment variables and dependencies are configured:
 
 ```bash
-sudo -u deploy -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp
-
-git clone https://github.com/your-account/your-repository.git app
-python3 -m venv venv
-/srv/myapp/venv/bin/python -m pip install --upgrade pip
-/srv/myapp/venv/bin/pip install -r app/requirements.txt
+sudo -u <APP_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py migrate --noinput
 '
 ```
 
-What `set -Eeuo pipefail` means:
+## Database lifecycle rules
 
-- `-e`: stop when a command fails.
-- `-E`: preserve error traps in functions/subshells if used.
-- `-u`: treat an unset variable as an error.
-- `pipefail`: fail a pipeline when any command in it fails, not only the last command.
+- Schema changes are Django migrations in Git.
+- Data is not in Git; it is protected by backup/restore.
+- Test restores into a separate database.
+- Do not run application management commands as `root`; run them as the app service identity with real production environment variables loaded.
+- Keep the database version and backup format documented before a server migration.
 
-This makes a deployment script fail loudly instead of continuing after a missing directory, failed install, or typo.
+---
 
-Ensure the service account can read the code and virtual environment:
+<!-- Source: server/04-systemd-and-environment.md -->
 
-```bash
-sudo chown -R deploy:myapp /srv/myapp/app /srv/myapp/venv
-sudo chmod -R g+rX /srv/myapp/app /srv/myapp/venv
-```
+# 13. systemd and environment files
 
-# 12. Create PostgreSQL role and database
+`systemd` is the service manager on modern Ubuntu. It starts services at boot, restarts failed services according to policy, records journal logs, and provides a stable operational interface.
 
-PostgreSQL has its own security identities. Create a restricted role for the app, then make that role own only its application database.
+## Why not `nohup gunicorn ... &`?
 
-```bash
-sudo -u postgres createuser \
-  --pwprompt \
-  --no-createdb \
-  --no-createrole \
-  --no-superuser \
-  myapp_db
+A background shell process has no structured restart policy, weak logging, unclear ownership, and does not reliably survive reboots. systemd makes the process an explicit system service.
 
-sudo -u postgres createdb --owner=myapp_db myapp
-```
-
-Meaning:
-
-- `--pwprompt`: asks for a password without putting it in shell history.
-- `--no-createdb`, `--no-createrole`, `--no-superuser`: app database credentials cannot create databases, create roles, or become a superuser.
-- `createdb --owner`: ensures the app database role owns its own database objects.
-
-Check it:
-
-```bash
-sudo -u postgres psql -c '\du'
-sudo -u postgres psql -c '\l'
-```
-
-Do not expose PostgreSQL port `5432` publicly for a single-server app. Django connects through `127.0.0.1`; browsers never need database access.
-
-# 13. Create the protected environment file
-
-```bash
-sudo tee /etc/myapp/myapp.env >/dev/null <<'EOF'
-DJANGO_SECRET_KEY='replace-with-a-generated-secret'
-DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=example.com,www.example.com
-DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com,https://www.example.com
-DJANGO_USE_HTTPS=True
-
-POSTGRES_DB=myapp
-POSTGRES_USER=myapp_db
-POSTGRES_PASSWORD='replace-with-the-db-role-password'
-POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
-POSTGRES_CONN_MAX_AGE=60
-EOF
-
-sudo chown root:myapp /etc/myapp/myapp.env
-sudo chmod 640 /etc/myapp/myapp.env
-```
-
-Why root owns the file:
-
-- The app service needs to **read** it.
-- The compromised web process should not be able to edit it.
-- Human deploy users should use controlled `sudo` to change secrets, not accidentally edit them as part of normal Git work.
-
-Generate a Django secret locally or on the server without displaying it in chat/logs:
-
-```bash
-/srv/myapp/venv/bin/python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
-```
-
-Treat any secret pasted into a public issue, chat, commit, screenshot, or shell history as potentially exposed; rotate it.
-
-<div class="chapter-break"></div>
-
-# Part VI - Turn the project into a service
-
-# 14. Test Django before wiring Apache
-
-Run maintenance commands as the **application service user** so you validate the same permissions and environment model Gunicorn will use.
-
-```bash
-sudo -u myapp -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp/app
-set -a
-. /etc/myapp/myapp.env
-set +a
-
-/srv/myapp/venv/bin/python manage.py check --deploy
-/srv/myapp/venv/bin/python manage.py migrate --noinput
-/srv/myapp/venv/bin/python manage.py collectstatic --noinput
-'
-```
-
-Why source the environment here? Your interactive shell does not automatically know the variables systemd will inject into Gunicorn. Activating a virtual environment only changes Python/PATH; it does not load secrets or database settings.
-
-**Do not run Django commands as root by default.** If root runs `manage.py`, PostgreSQL or settings may infer the wrong identity/environment and fail in misleading ways.
-
-# 15. Gunicorn service: build it and understand it
-
-Create `/etc/systemd/system/myapp-gunicorn.service`:
+## Environment file pattern
 
 ```ini
+# /etc/<APP_NAME>/<APP_NAME>.env
+DJANGO_SECRET_KEY='...'
+DJANGO_DEBUG=False
+POSTGRES_DB=<DB_NAME>
+POSTGRES_USER=<DB_USER>
+POSTGRES_PASSWORD='...'
+```
+
+A systemd service can load it with:
+
+```ini
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+```
+
+This is not encrypted storage. Its safety comes from permissions and host access control. A secret manager can replace it later, but a permission-controlled environment file is a useful small-VPS baseline.
+
+## Service lifecycle commands
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now <APP_NAME>
+sudo systemctl restart <APP_NAME>
+sudo systemctl status <APP_NAME>
+sudo journalctl -u <APP_NAME> -n 100 --no-pager
+sudo journalctl -u <APP_NAME> -f
+```
+
+## Important service design rules
+
+- Run the service as `<APP_USER>`, never root.
+- Set `WorkingDirectory` so relative paths behave predictably.
+- Use absolute executable paths (`/srv/.../venv/bin/gunicorn`).
+- Keep application port/socket private.
+- Use `Restart=on-failure` for resilience, not to hide a persistent crash.
+- Use `systemctl status` and the journal to understand failure before repeatedly restarting.
+
+## What systemd is doing for you
+
+When you create `/etc/systemd/system/<APP_NAME>.service`, you are teaching the operating system how to run your app. Instead of depending on a terminal window, systemd becomes responsible for the process.
+
+It handles:
+
+- starting the app at boot;
+- restarting it when it crashes if policy allows;
+- attaching logs to the system journal;
+- running the process as the correct Linux user;
+- ordering startup after basic dependencies such as networking;
+- giving operators one consistent command interface.
+
+## Explain the lifecycle commands
+
+```bash
+sudo systemctl daemon-reload
+```
+
+Systemd does not reread every unit file on every command. After adding or editing a `.service` file, `daemon-reload` tells systemd to reload unit definitions from disk.
+
+```bash
+sudo systemctl enable --now <APP_NAME>
+```
+
+`enable` means "start this service automatically at boot." `--now` means "also start it immediately." Without `--now`, the service may be enabled for the next reboot but not running yet.
+
+```bash
+sudo systemctl restart <APP_NAME>
+```
+
+This stops and starts the service. Use it after code or environment changes that require a fresh Python process.
+
+```bash
+sudo systemctl status <APP_NAME>
+```
+
+This shows whether systemd thinks the service is active, failed, restarting, or disabled. It also shows the main process ID and recent log lines.
+
+```bash
+sudo journalctl -u <APP_NAME> -n 100 --no-pager
+```
+
+This reads the last 100 journal lines for that service. `--no-pager` prints directly to the terminal, which is easier to copy into notes.
+
+```bash
+sudo journalctl -u <APP_NAME> -f
+```
+
+This follows new logs live. Use it in one terminal while making a request from another terminal or browser.
+
+## Reading a service failure
+
+If a service fails, do not immediately change random settings. Read the first real error. Common examples:
+
+| Log clue | Likely meaning |
+|---|---|
+| `KeyError: 'DJANGO_SECRET_KEY'` | environment file is missing a required variable |
+| `ModuleNotFoundError` | wrong virtualenv, missing dependency, or wrong project package name |
+| `permission denied` | service user cannot read code, env file, socket, static, or media path |
+| `could not connect to server` | PostgreSQL is down, private address is wrong, or credentials are wrong |
+| `Address already in use` | another process is already bound to that port/socket |
+
+The log is evidence. Preserve it while you debug.
+
+---
+
+<!-- Source: stacks/01-gunicorn.md -->
+
+# 14. Gunicorn: the WSGI application server
+
+Gunicorn imports the Django WSGI application and manages Python worker processes. It is the bridge between your reverse proxy and Django.
+
+## Why Gunicorn exists
+
+`runserver` is a development tool. Gunicorn is a production WSGI process manager that accepts HTTP from a trusted local proxy and routes work into Django workers.
+
+## Minimal systemd service
+
+```ini
+# /etc/systemd/system/<APP_NAME>.service
 [Unit]
-Description=Gunicorn application server for myapp
-After=network.target
+Description=<APP_NAME> Django application via Gunicorn
+After=network.target postgresql.service
+Wants=postgresql.service
 
 [Service]
-User=myapp
-Group=myapp
-WorkingDirectory=/srv/myapp/app
-EnvironmentFile=/etc/myapp/myapp.env
-Environment="PATH=/srv/myapp/venv/bin"
-
-ExecStart=/srv/myapp/venv/bin/gunicorn \
+Type=simple
+User=<APP_USER>
+Group=<APP_USER>
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+ExecStart=/srv/<APP_NAME>/venv/bin/gunicorn \
   --workers 3 \
-  --bind 127.0.0.1:8001 \
+  --bind 127.0.0.1:8000 \
   --access-logfile - \
   --error-logfile - \
-  myproject.wsgi:application
-
+  <PROJECT_PACKAGE>.wsgi:application
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -1110,257 +1610,953 @@ TimeoutStopSec=30
 WantedBy=multi-user.target
 ```
 
-Enable and start it:
+## Explain each important directive
+
+| Directive | Why it exists |
+|---|---|
+| `User` / `Group` | runs Python with limited privileges |
+| `WorkingDirectory` | lets Django resolve project-relative paths predictably |
+| `EnvironmentFile` | provides production variables without committing them to Git |
+| `ExecStart` | absolute command systemd executes |
+| `--workers 3` | three synchronous workers; tune from measurement, not folklore |
+| `--bind 127.0.0.1:8000` | local-only port; reverse proxy is the public entry point |
+| `--access-logfile -` / `--error-logfile -` | emits logs into `journalctl` |
+| `Restart=on-failure` | restarts a crash, but preserves evidence in logs |
+
+## Worker count
+
+A common starting heuristic is a small number of workers such as 2–3 for a small VPS. A popular formula such as `2 × CPU + 1` is only a heuristic. Each Python worker consumes memory; too many workers can make a small VPS slower or unstable. Start conservatively, observe memory, latency, and worker timeouts, then tune.
+
+## Bind choices
+
+| Binding | Good for | Trade-off |
+|---|---|---|
+| `127.0.0.1:8000` | easiest to understand; works with all proxies | reserves a local TCP port |
+| Unix socket | same-host proxy/app communication | requires socket permissions and proxy-specific syntax |
+| `0.0.0.0:8000` | almost never needed | exposes app server unless firewall/proxy constraints are perfect |
+
+Start with loopback TCP. Move to a Unix socket only when you understand and benefit from it.
+
+## Verify Gunicorn before configuring a proxy
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now myapp-gunicorn.service
-sudo systemctl --no-pager --full status myapp-gunicorn.service
+sudo systemctl enable --now <APP_NAME>
+sudo systemctl status <APP_NAME>
+curl -I http://127.0.0.1:8000/
 ```
 
-## 15.1 Every important Gunicorn/systemd line explained
+A `400 DisallowedHost` from this direct test can be expected if the Host header is not allowed; use a permitted Host or focus on service logs. Do not open port 8000 to the internet merely to test it.
 
-| Line | Meaning | Why it matters |
-|---|---|---|
-| `[Unit]` | service metadata/dependencies | lets systemd order startup |
-| `After=network.target` | start after basic networking | avoids starting too early during boot |
-| `User=myapp` / `Group=myapp` | run as restricted account | web code does not run as root |
-| `WorkingDirectory` | base directory for relative paths | Django/Gunicorn import paths work predictably |
-| `EnvironmentFile` | load protected settings/secrets | keeps credentials out of code and unit text |
-| `PATH=...` | use virtualenv binaries | correct Gunicorn/Python packages are used |
-| `ExecStart` | exact process systemd starts | this is the application runtime contract |
-| `--workers 3` | run three worker processes | basic concurrency; tune from measurement |
-| `--bind 127.0.0.1:8001` | listen only on local loopback | prevents direct public access to Gunicorn |
-| `--access-logfile -` | send access logs to stdout/journal | use `journalctl` instead of ad-hoc files |
-| `--error-logfile -` | send errors to stderr/journal | central debugging path |
-| `Restart=on-failure` | restart after unexpected exit | app comes back after crashes |
-| `WantedBy=multi-user.target` | enable at normal server boot | app returns after reboot |
+## What happens when Gunicorn starts
 
-## 15.2 Test Gunicorn directly, but only locally
+When systemd runs the `ExecStart` command, Gunicorn does roughly this:
+
+1. starts a master process;
+2. imports `<PROJECT_PACKAGE>.wsgi:application`;
+3. creates worker processes;
+4. listens on `127.0.0.1:8000`;
+5. waits for the reverse proxy to send HTTP requests;
+6. passes each request into Django;
+7. writes access/error logs to stdout/stderr, which systemd captures.
+
+If import fails, workers never become healthy. That usually means a Python error, missing dependency, bad environment variable, or wrong project package name.
+
+## Understanding `<PROJECT_PACKAGE>.wsgi:application`
+
+If your Django project was created with:
 
 ```bash
-curl -I http://127.0.0.1:8001/healthz/
+django-admin startproject config .
 ```
 
-A good result proves Gunicorn imported Django and Django answered locally. It does **not** prove Apache, TLS, DNS, or the firewall.
+then your WSGI object is usually:
 
-## 15.3 Optional systemd hardening after the app already works
-
-Add gradually and test after each change:
-
-```ini
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/srv/myapp/media
+```text
+config.wsgi:application
 ```
 
-These can reduce the process’s ability to change the host filesystem. They are useful, but settings vary by app. Do not blindly add them and assume success; verify uploads, temporary files, logs, and background work afterward.
+The part before the colon is a Python module path. The part after the colon is the variable inside that module. Gunicorn imports it just like Python code would. If your project package is named `mysite`, use `mysite.wsgi:application` instead.
 
-# 16. Apache: the public front door
+## Why Gunicorn should not be public
 
-Enable the modules used by the guided architecture:
+Gunicorn is good at running Python workers. It is not meant to be your full public internet edge. The reverse proxy is better at TLS, slow-client buffering, static files, request size limits, compression, and mature HTTP behavior.
+
+That is why this guide binds Gunicorn to loopback:
+
+```text
+127.0.0.1:8000
+```
+
+Only processes on the same server can reach that address. The public internet reaches Nginx/Apache/Caddy on ports 80 and 443, and the proxy reaches Gunicorn privately.
+
+---
+
+<!-- Source: stacks/02-nginx-gunicorn-postgres.md -->
+
+# 15. Nginx + Gunicorn + PostgreSQL
+
+This is the recommended reference stack for a first conventional Django VPS deployment.
+
+```text
+Internet → Nginx :80/:443 → Gunicorn 127.0.0.1:8000 → Django → PostgreSQL
+```
+
+## Why this stack
+
+Nginx is excellent at public HTTP/TLS, redirects, static file delivery, buffering slow clients, and reverse proxying. Gunicorn focuses on Python workers. PostgreSQL stores application data. Each component has a narrow, understandable job.
+
+## Install Nginx and Certbot
 
 ```bash
-sudo a2enmod proxy proxy_http headers rewrite ssl
-sudo systemctl restart apache2
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable --now nginx
 ```
 
-Create an initial HTTP virtual host at `/etc/apache2/sites-available/myapp.conf`:
+## HTTP configuration before certificate issuance
+
+```nginx
+# /etc/nginx/sites-available/<APP_NAME>
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <DOMAIN> <WWW_DOMAIN>;
+
+    location /static/ {
+        alias /srv/<APP_NAME>/staticfiles/;
+    }
+
+    location /media/ {
+        alias /srv/<APP_NAME>/media/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Enable and test:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/<APP_NAME> /etc/nginx/sites-enabled/<APP_NAME>
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## Explain the configuration
+
+| Directive | Meaning |
+|---|---|
+| `listen 80` | accepts HTTP for certificate validation/initial traffic |
+| `server_name` | chooses this server block for matching hostnames |
+| `alias` | maps web paths to filesystem directories; trailing slash matters |
+| `proxy_pass` | forwards dynamic requests to Gunicorn locally |
+| `Host` | preserves the client hostname so Django can apply host checks |
+| `X-Forwarded-For` | records original client address chain |
+| `X-Forwarded-Proto` | tells Django whether the browser used HTTPS |
+
+## Obtain TLS certificate
+
+Once DNS resolves to this server and port 80 is reachable:
+
+```bash
+sudo certbot --nginx -d <DOMAIN> -d <WWW_DOMAIN>
+```
+
+Certbot can modify the Nginx configuration to add certificate paths and an HTTP-to-HTTPS redirect. Read the resulting file rather than treating it as magic.
+
+## Final Nginx behavior
+
+After TLS, your HTTP server block should redirect all requests to HTTPS. Your HTTPS server block should continue to serve static/media and proxy dynamic paths.
+
+## Verification
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx
+sudo systemctl status <APP_NAME>
+curl -I http://<DOMAIN>
+curl -I https://<DOMAIN>
+curl -fsS https://<DOMAIN>/healthz/
+```
+
+## Common Nginx/Gunicorn problems
+
+- `502 Bad Gateway`: Gunicorn stopped, wrong port, wrong `proxy_pass`, or application crash.
+- static `404`: wrong `alias` path or missing `collectstatic`.
+- `403`: Nginx lacks directory traversal/read permission, or an app-level CSRF rule is failing.
+- redirect loop: `X-Forwarded-Proto` and Django `SECURE_PROXY_SSL_HEADER` disagree.
+
+## Walk through the Nginx server block slowly
+
+```nginx
+server {
+```
+
+A `server` block is one virtual host. Nginx can host multiple sites on one machine; it chooses the block using the request port and hostname.
+
+```nginx
+listen 80;
+listen [::]:80;
+```
+
+These lines accept HTTP on IPv4 and IPv6. Port 80 is also used by common Let's Encrypt validation.
+
+```nginx
+server_name <DOMAIN> <WWW_DOMAIN>;
+```
+
+This says which hostnames belong to this site. If the browser requests `example.com`, Nginx can match that name to the correct block.
+
+```nginx
+location /static/ {
+    alias /srv/<APP_NAME>/staticfiles/;
+}
+```
+
+Requests beginning with `/static/` are served directly from the `staticfiles` directory. Django does not handle these files in production. The trailing slash on `alias` matters because Nginx joins the remaining request path to that directory.
+
+```nginx
+location /media/ {
+    alias /srv/<APP_NAME>/media/;
+}
+```
+
+This serves user-uploaded files when you use local media storage. If you use S3-compatible object storage, this block may disappear because media is served by object storage/CDN instead.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+```
+
+`location /` catches dynamic application requests. `proxy_pass` sends them to Gunicorn on the private loopback port.
+
+```nginx
+proxy_set_header Host $host;
+```
+
+This preserves the original hostname. Django needs it for `ALLOWED_HOSTS`, URL generation, CSRF checks, and redirects.
+
+```nginx
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
+
+These pass client IP information to the app. If you are behind another proxy or CDN, the chain can contain more than one IP. Do not blindly trust it for security decisions unless your proxy chain is controlled.
+
+```nginx
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+This tells Django whether the browser used HTTP or HTTPS at the public edge. Django can use it with `SECURE_PROXY_SSL_HEADER` when Gunicorn is private.
+
+## How to debug the stack layer by layer
+
+Use this order:
+
+1. `dig +short <DOMAIN>` confirms DNS points to the server.
+2. `sudo ufw status numbered` confirms ports 80 and 443 are open.
+3. `sudo nginx -t` confirms Nginx config syntax.
+4. `sudo systemctl status nginx` confirms Nginx is running.
+5. `sudo systemctl status <APP_NAME>` confirms Gunicorn is running.
+6. `curl -I http://127.0.0.1:8000/` tests Gunicorn from the server.
+7. `curl -I http://<DOMAIN>/` tests the public HTTP path.
+8. `curl -I https://<DOMAIN>/` tests the public HTTPS path after TLS.
+
+This order prevents guessing. A 502 is different from DNS failure, and both are different from a Django 500.
+
+---
+
+<!-- Source: stacks/03-apache-gunicorn-postgres.md -->
+
+# 16. Apache + Gunicorn + PostgreSQL
+
+Use this stack when Apache is already your web-server standard or you prefer its virtual-host/module ecosystem.
+
+```text
+Internet → Apache :80/:443 → Gunicorn 127.0.0.1:8000 → Django → PostgreSQL
+```
+
+## Install modules
+
+```bash
+sudo apt install -y apache2 certbot python3-certbot-apache
+sudo a2enmod proxy proxy_http headers ssl rewrite
+sudo systemctl enable --now apache2
+```
+
+## HTTP virtual host before TLS
 
 ```apache
+# /etc/apache2/sites-available/<APP_NAME>.conf
 <VirtualHost *:80>
-    ServerName example.com
-    ServerAlias www.example.com
+    ServerName <DOMAIN>
+    ServerAlias <WWW_DOMAIN>
 
-    ErrorLog ${APACHE_LOG_DIR}/myapp-http-error.log
-    CustomLog ${APACHE_LOG_DIR}/myapp-http-access.log combined
+    Alias /static/ /srv/<APP_NAME>/staticfiles/
+    <Directory /srv/<APP_NAME>/staticfiles/>
+        Require all granted
+    </Directory>
+
+    Alias /media/ /srv/<APP_NAME>/media/
+    <Directory /srv/<APP_NAME>/media/>
+        Require all granted
+    </Directory>
+
+    ProxyPreserveHost On
+    RequestHeader set X-Forwarded-Proto "http"
+    ProxyPass /static/ !
+    ProxyPass /media/ !
+    ProxyPass / http://127.0.0.1:8000/
+    ProxyPassReverse / http://127.0.0.1:8000/
+
+    ErrorLog ${APACHE_LOG_DIR}/<APP_NAME>-error.log
+    CustomLog ${APACHE_LOG_DIR}/<APP_NAME>-access.log combined
 </VirtualHost>
 ```
 
-Enable it:
+Enable and test:
 
 ```bash
-sudo a2ensite myapp.conf
+sudo a2ensite <APP_NAME>.conf
 sudo a2dissite 000-default.conf
 sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
 
-Then obtain a certificate using Certbot’s Apache integration:
+## TLS
 
 ```bash
-sudo certbot --apache -d example.com -d www.example.com
+sudo certbot --apache -d <DOMAIN> -d <WWW_DOMAIN>
 ```
 
-Certbot may offer to redirect HTTP to HTTPS. That is usually appropriate after you confirm both domain names are correct.
-
-## 16.1 Final Apache HTTPS virtual host, annotated
-
-After certificate issuance, the final SSL virtual host should conceptually look like this:
-
-```apache
-<IfModule mod_ssl.c>
-<VirtualHost *:443>
-    ServerName example.com
-    ServerAlias www.example.com
-
-    SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/example.com/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/example.com/privkey.pem
-
-    # Keep the original public Host header for Django.
-    ProxyPreserveHost On
-
-    # Tell Django that the original client connection used HTTPS.
-    RequestHeader set X-Forwarded-Proto "https"
-
-    # Static and media must be served directly, before the catch-all proxy.
-    ProxyPass /static/ !
-    Alias /static/ /srv/myapp/staticfiles/
-    <Directory /srv/myapp/staticfiles>
-        Require all granted
-    </Directory>
-
-    ProxyPass /media/ !
-    Alias /media/ /srv/myapp/media/
-    <Directory /srv/myapp/media>
-        Require all granted
-    </Directory>
-
-    # Everything else is dynamic and goes to Gunicorn on loopback.
-    ProxyPass / http://127.0.0.1:8001/
-    ProxyPassReverse / http://127.0.0.1:8001/
-
-    # Safe baseline response headers. Test framing/CSP needs per application.
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    Header always set X-Frame-Options "DENY"
-
-    ErrorLog ${APACHE_LOG_DIR}/myapp-ssl-error.log
-    CustomLog ${APACHE_LOG_DIR}/myapp-ssl-access.log combined
-</VirtualHost>
-</IfModule>
-```
-
-## 16.2 Why directive order matters
-
-Apache processes `ProxyPass` rules in order. The exceptions for `/static/` and `/media/` must appear before the catch-all `/` proxy. Otherwise Apache forwards static-file URLs to Gunicorn instead of serving them from disk.
-
-## 16.3 Why `ProxyPreserveHost On` matters
-
-Django uses host information for `ALLOWED_HOSTS`, redirects, and URL construction. Preserving the original host avoids the backend seeing only `127.0.0.1:8001`.
-
-## 16.4 Why `X-Forwarded-Proto` matters
-
-Apache terminates TLS, then proxies plain HTTP to Gunicorn over loopback. Without a trusted forwarded-protocol header, Django sees the backend connection as HTTP even though the browser used HTTPS. That can cause redirect loops, secure-cookie problems, or CSRF behavior that seems inconsistent.
-
-The pair is deliberate:
+After Certbot creates/enables the TLS virtual host, ensure the HTTPS vhost sends:
 
 ```apache
 RequestHeader set X-Forwarded-Proto "https"
 ```
 
-```python
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-```
+and preserves `ProxyPreserveHost On`. Django can then be configured with `SECURE_PROXY_SSL_HEADER` when appropriate.
 
-Only configure this pair when **your own trusted proxy** sets the header. Never trust arbitrary client-provided proxy headers.
+## Why Apache + Gunicorn instead of mod_wsgi?
 
-## 16.5 Apache verification
+This keeps Python process management separate from the web server. Gunicorn is easy to run under systemd, restart, and inspect through its own journal. Choose mod_wsgi when you specifically want Apache to host WSGI directly and understand its Python/virtualenv compatibility requirements.
+
+## Verification
 
 ```bash
 sudo apache2ctl configtest
-sudo systemctl reload apache2
-sudo systemctl --no-pager --full status apache2
-
-curl -I http://127.0.0.1/
-curl -kI --resolve example.com:443:127.0.0.1 https://example.com/healthz/
+sudo systemctl status apache2
+sudo journalctl -u <APP_NAME> -n 100 --no-pager
+sudo tail -n 100 /var/log/apache2/<APP_NAME>-error.log
 ```
 
-Expected pattern:
+---
 
-- HTTP returns `301` or `308` redirect to HTTPS.
-- HTTPS returns `200` from your Django health endpoint.
+<!-- Source: stacks/04-apache-modwsgi.md -->
 
-<div class="chapter-break"></div>
+# 17. Apache + mod_wsgi
 
-# 17. HTTPS and certificate renewal
+`mod_wsgi` is an Apache module that hosts Python WSGI applications. This removes Gunicorn from the architecture:
 
-## 17.1 What Certbot needs before it can succeed
+```text
+Internet → Apache + mod_wsgi → Django → PostgreSQL
+```
 
-- DNS for the domain points to the server’s public IP.
-- Port 80 is reachable from the public internet for normal HTTP validation.
-- Apache has a matching `ServerName`/`ServerAlias` virtual host.
-- No proxy/CDN configuration blocks the validation path unexpectedly.
+## When it is a good choice
 
-## 17.2 Verify automatic renewal
+- Apache is already mandatory/standard in the environment.
+- Your team has mod_wsgi operational experience.
+- You prefer one service family rather than proxying to Gunicorn.
+
+## What makes it harder
+
+`mod_wsgi` is compiled against a Python installation. The Python version and virtual environment must be compatible. This is why Gunicorn is often the lower-friction first choice for a standalone Django VPS.
+
+## Install
+
+```bash
+sudo apt install -y apache2 libapache2-mod-wsgi-py3
+sudo a2enmod wsgi ssl headers
+```
+
+## Daemon-mode configuration
+
+Use daemon mode so Django runs in its own managed Apache daemon group rather than inside generic Apache worker processes.
+
+```apache
+# /etc/apache2/sites-available/<APP_NAME>.conf
+<VirtualHost *:80>
+    ServerName <DOMAIN>
+
+    Alias /static/ /srv/<APP_NAME>/staticfiles/
+    <Directory /srv/<APP_NAME>/staticfiles/>
+        Require all granted
+    </Directory>
+
+    WSGIDaemonProcess <APP_NAME> \
+        python-home=/srv/<APP_NAME>/venv \
+        python-path=/srv/<APP_NAME>/app \
+        processes=2 threads=15
+    WSGIProcessGroup <APP_NAME>
+    WSGIScriptAlias / /srv/<APP_NAME>/app/<PROJECT_PACKAGE>/wsgi.py
+
+    <Directory /srv/<APP_NAME>/app/<PROJECT_PACKAGE>>
+        <Files wsgi.py>
+            Require all granted
+        </Files>
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/<APP_NAME>-error.log
+    CustomLog ${APACHE_LOG_DIR}/<APP_NAME>-access.log combined
+</VirtualHost>
+```
+
+## Important notes
+
+- Confirm the installed `mod_wsgi` matches your Python major/minor version.
+- Make code readable/traversable by the Apache/mod_wsgi daemon user.
+- Static files should still be served by Apache, not Django.
+- Use `collectstatic` and private environment variables exactly as you would with Gunicorn.
+- Use Certbot and the same UFW model: only 22/80/443 public.
+
+## Select this on purpose
+
+Do not treat mod_wsgi as automatically “more native” or Gunicorn as automatically “more modern.” Both are valid WSGI approaches. Pick the one your operational model can support confidently.
+
+---
+
+<!-- Source: stacks/05-caddy-gunicorn.md -->
+
+# 18. Caddy + Gunicorn
+
+Caddy is a web server and reverse proxy with automatic HTTPS as a central feature.
+
+```text
+Internet → Caddy :80/:443 → Gunicorn 127.0.0.1:8000 → Django → PostgreSQL
+```
+
+## Why choose Caddy
+
+- concise configuration,
+- automatic certificate provisioning and renewal for valid public hostnames,
+- automatic HTTP-to-HTTPS redirect behavior in normal cases,
+- useful defaults for a small server.
+
+Caddy does not replace Django security settings, database backups, UFW, systemd, or testing.
+
+## Example Caddyfile
+
+```caddyfile
+# /etc/caddy/Caddyfile
+<DOMAIN>, <WWW_DOMAIN> {
+    encode zstd gzip
+
+    handle_path /static/* {
+        root * /srv/<APP_NAME>/staticfiles
+        file_server
+    }
+
+    handle_path /media/* {
+        root * /srv/<APP_NAME>/media
+        file_server
+    }
+
+    reverse_proxy 127.0.0.1:8000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+```
+
+## Notes
+
+- Caddy must be able to bind ports 80 and 443 and the public DNS record must point to the server.
+- `handle_path` strips the matching prefix; use it only when the filesystem root is set for the stripped path. Test static URLs carefully.
+- Configure Django proxy awareness only if the proxy sends the required forwarded-proto header.
+- Use `caddy validate --config /etc/caddy/Caddyfile` before reloads.
+
+## When not to choose Caddy
+
+Do not pick Caddy only because it has fewer lines of config if your team has established Apache/Nginx processes that are better understood and maintained. Operational familiarity is a real technical advantage.
+
+---
+
+<!-- Source: stacks/06-asgi-websockets.md -->
+
+# 19. ASGI: Uvicorn, Daphne, Hypercorn, and WebSockets
+
+## Architecture
+
+```text
+Internet → Nginx/Apache/Caddy → ASGI server on localhost → Django ASGI app → PostgreSQL/Redis
+```
+
+Use this when the app requires WebSockets, live updates, async consumers, or other long-lived connections. Ordinary HTTP Django views can also run under ASGI.
+
+## ASGI server comparison
+
+| Server | Best known for | Notes |
+|---|---|---|
+| Uvicorn | widely used high-performance ASGI server | common choice for Django/Starlette/FastAPI |
+| Daphne | Django Channels/WebSockets ecosystem | natural choice for Channels-oriented apps |
+| Hypercorn | ASGI/WSGI and multiple protocol options | useful when its feature set fits your needs |
+
+## Uvicorn systemd service example
+
+```ini
+# /etc/systemd/system/<APP_NAME>-asgi.service
+[Unit]
+Description=<APP_NAME> Django ASGI application via Uvicorn
+After=network.target postgresql.service
+
+[Service]
+User=<APP_USER>
+Group=<APP_USER>
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
+  <PROJECT_PACKAGE>.asgi:application \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --proxy-headers
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Nginx proxy settings for WebSockets
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+The `Upgrade` and `Connection` headers matter for WebSocket handshakes. They are not required for conventional WSGI HTTP proxying.
+
+## Redis and background concerns
+
+Real-time features may introduce Redis as a channel layer/cache/broker. Redis should also remain private, authenticated where applicable, and included in your backup/operational plan only when it stores durable or critical state.
+
+## ASGI warning
+
+Async code changes failure modes. Test disconnect behavior, long-lived client load, proxy timeouts, worker restarts, and background task interactions. Do not assume an ASGI migration is a one-line server substitution.
+
+---
+
+<!-- Source: stacks/07-docker-compose.md -->
+
+# 20. Docker Compose
+
+Docker packages processes and dependencies into images/containers. Docker Compose describes a multi-service application in YAML.
+
+## What it solves
+
+- reproducible dependency versions,
+- consistent local/CI/server service topology,
+- explicit network and volume configuration,
+- easier separation between web, worker, database, cache, and proxy services.
+
+## What it does not solve
+
+Containers do not automatically give you secure secrets, TLS, backups, monitoring, database durability, firewall policy, or a good deployment strategy. They make these concerns more explicit; they do not erase them.
+
+## Minimal conceptual Compose topology
+
+```text
+Caddy/Nginx container → web (Gunicorn/Uvicorn) container → PostgreSQL container
+                                        ↘ Redis/worker container (optional)
+```
+
+## Example `docker-compose.yml`
+
+```yaml
+services:
+  web:
+    build: .
+    command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: <DB_NAME>
+      POSTGRES_USER: <DB_USER>
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U <DB_USER> -d <DB_NAME>"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  proxy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - static_data:/srv/static:ro
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+  caddy_data:
+  static_data:
+```
+
+This is a conceptual starting point, not a copy-paste production answer. You must decide how `collectstatic` populates the static volume, how media persists, how backups access the database, where production secrets come from, and how image versions are pinned.
+
+## Docker security baseline
+
+- Do not put secrets in Dockerfile `ENV` instructions or commit real `.env` files.
+- Run containers as non-root where practical.
+- Pin base images and rebuild for security updates.
+- Do not publish database/cache ports unless intentionally private/restricted.
+- Persist database and media with named volumes or external storage.
+- Back up database data outside the Docker host.
+
+## When Compose is worth it
+
+Use it when repeatability and multi-service clarity help your team. Do not force Docker into a one-process hobby project purely for fashion; a well-managed systemd deployment can be simpler and safer for that case.
+
+---
+
+<!-- Source: stacks/08-managed-and-kubernetes.md -->
+
+# 21. PaaS, managed hosting, serverless, and Kubernetes
+
+## Managed PaaS
+
+A PaaS generally accepts code or a container image and provides routing, TLS, logs, environment variables, process execution, and sometimes a managed database.
+
+**Good fit:** solo developers/small teams that want fast deployment and less OS administration.
+
+**Still your responsibility:** Django settings, migrations, data model, secrets, access control, application logs, backup policy, testing, vendor limits, and release/rollback workflow.
+
+## Managed databases
+
+A managed PostgreSQL service shifts patching, replication, and some backup burden to the provider. It does not mean “never export data” or “ignore restore testing.” You still need access controls, connection security, retention awareness, and recovery documentation.
+
+## Serverless
+
+Serverless functions can work for request-driven workloads, but a traditional stateful Django app may need adaptation for cold starts, storage, WebSockets, migrations, scheduled work, and database connections. Choose it for its operational/economic fit, not as a default replacement for a VPS.
+
+## Kubernetes
+
+Kubernetes coordinates containers across machines. Its core concepts include:
+
+| Object | Role |
+|---|---|
+| Deployment | desired replica count and rollout behavior |
+| Pod | running unit containing one/more containers |
+| Service | stable internal network endpoint |
+| Ingress/Gateway | HTTP/TLS entry routing |
+| ConfigMap | non-secret config |
+| Secret | sensitive configuration reference |
+| PersistentVolume | durable storage abstraction |
+
+**Use Kubernetes when:** you have multiple services, multiple environments, a team able to operate it, clear scaling/availability needs, and a reason to standardize orchestration.
+
+**Do not start there when:** one Django app on one VPS is your reality. Kubernetes can make a simple system difficult to understand, debug, and secure.
+
+## A sensible growth path
+
+```text
+single VPS + systemd
+→ add backups/monitoring/staging
+→ managed database or object storage
+→ multiple app instances behind a proxy/load balancer
+→ containers/Compose where helpful
+→ managed container platform or Kubernetes only when justified
+```
+
+The best architecture is the smallest one that reliably meets present requirements and can be evolved without losing data or operational clarity.
+
+---
+
+<!-- Source: stacks/09-uwsgi-nginx.md -->
+
+# 22. uWSGI + Nginx
+
+uWSGI is another production WSGI application server. Django documents how to integrate it with Django, and Nginx can proxy to it using the uWSGI protocol.
+
+```text
+Internet → Nginx :80/:443 → uWSGI (private socket) → Django WSGI → PostgreSQL
+```
+
+## Why choose uWSGI
+
+uWSGI is mature, powerful, and widely used. It provides many process-management, socket, and protocol options.
+
+## Why it is not the default beginner choice
+
+The number of uWSGI options and the distinction between the **uWSGI server** and the **uWSGI protocol** add cognitive load. Gunicorn is often easier to start, inspect, and operate for one Django app. Use uWSGI when your team or platform already standardizes on it or its features meet a known need.
+
+## Example `uwsgi.ini`
+
+```ini
+[uwsgi]
+chdir = /srv/<APP_NAME>/app
+module = <PROJECT_PACKAGE>.wsgi:application
+home = /srv/<APP_NAME>/venv
+master = true
+processes = 3
+threads = 2
+socket = 127.0.0.1:8002
+vacuum = true
+die-on-term = true
+need-app = true
+```
+
+`die-on-term = true` makes uWSGI react correctly to systemd termination signals rather than attempting an unexpected reload behavior.
+
+## systemd service outline
+
+```ini
+[Service]
+User=<APP_USER>
+Group=<APP_USER>
+WorkingDirectory=/srv/<APP_NAME>/app
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+ExecStart=/srv/<APP_NAME>/venv/bin/uwsgi --ini /etc/<APP_NAME>/uwsgi.ini
+Restart=on-failure
+```
+
+## Nginx location
+
+```nginx
+location / {
+    include uwsgi_params;
+    uwsgi_pass 127.0.0.1:8002;
+}
+```
+
+Or use a Unix socket after understanding socket ownership and Nginx permissions.
+
+## Operational rules
+
+- Keep the uWSGI endpoint private: loopback or a private Unix socket.
+- Put Nginx in front for TLS, static files, buffering, and access logging.
+- Log through systemd/journald or a deliberate log path.
+- Start from a simple config and add advanced options only when measured behavior calls for them.
+
+Read the current uWSGI and Django integration documentation before using version-specific flags.
+
+---
+
+<!-- Source: stacks/10-other-valid-options.md -->
+
+# 23. Other valid options and where they fit
+
+The main stacks in this book cover the usual first choices. These tools are also valid in particular environments.
+
+## Nginx Unit
+
+Nginx Unit is an application server from the Nginx ecosystem that can run application processes with dynamic configuration. It can fit teams already using Unit, but it is a different product from Nginx itself. Learn its application/process model before choosing it as a “simpler Nginx.”
+
+## Waitress
+
+Waitress is a pure-Python WSGI server often valued for cross-platform simplicity. It can serve Django, but on Linux VPS deployments Gunicorn/uWSGI/mod_wsgi tend to have more common operational patterns. It is not normally the first choice for a high-concurrency Linux web stack.
+
+## Traefik
+
+Traefik is a reverse proxy/load balancer popular in Docker/Kubernetes environments because it discovers services dynamically through labels/providers.
+
+**Use it when:** you have containerized multi-service routing and want dynamic configuration.
+
+**Do not use it for:** one static Django service on a VPS when Nginx/Apache/Caddy would be simpler to understand.
+
+## HAProxy
+
+HAProxy is an excellent load balancer/proxy, especially in multi-instance/high-availability environments. It can sit in front of multiple Django application servers. For a single app on one host, it is usually unnecessary.
+
+## CDN and object storage
+
+A CDN can cache static content near users and absorb bandwidth. Object storage can hold media/uploads outside the app host.
+
+**Benefits:** offloads static/media, improves global delivery, reduces single-disk risk.
+
+**Responsibilities:** cache invalidation, signed/private media policy, origin access, upload configuration, storage backup/lifecycle, and correct proxy headers.
+
+## Cloud load balancers
+
+Cloud providers often offer managed HTTP/TLS load balancers. These can terminate TLS and distribute traffic to multiple app instances. Django must be configured carefully to understand forwarded HTTPS headers, and app instances must be stateless enough for multiple replicas.
+
+## The selection rule
+
+A technology is not better because it has more features. Prefer the smallest toolset that your team can correctly configure, monitor, patch, back up, and recover.
+
+---
+
+<!-- Source: operations/01-tls-https.md -->
+
+# 24. TLS, HTTPS, redirects, and HSTS
+
+HTTPS is HTTP protected by TLS. TLS provides confidentiality, integrity, and server identity verification for browser-to-server traffic.
+
+## Certificate prerequisites
+
+Before Let’s Encrypt/Certbot can issue a normal public certificate:
+
+- `<DOMAIN>` must resolve to the intended server,
+- inbound port 80 must be reachable for common HTTP validation methods,
+- the reverse proxy must have a matching virtual host/server block,
+- no unrelated proxy/CDN behavior should block validation unless deliberately configured.
+
+## Certbot patterns
+
+For Nginx:
+
+```bash
+sudo certbot --nginx -d <DOMAIN> -d <WWW_DOMAIN>
+```
+
+For Apache:
+
+```bash
+sudo certbot --apache -d <DOMAIN> -d <WWW_DOMAIN>
+```
+
+The plugins can obtain certificates and modify configuration to enable TLS/redirects. Read the resulting config. Automation is not a substitute for understanding which vhost is serving which hostname.
+
+## Verify renewal
 
 ```bash
 sudo certbot renew --dry-run
-systemctl list-timers --all | grep -i certbot || true
+systemctl list-timers | grep certbot
 ```
 
-Certbot considers certificates ready for renewal when they are within part of their lifetime window; do not wait until expiry to test. [Certbot]
+## HTTP-to-HTTPS redirect
 
-## 17.3 HSTS: useful but intentionally deferred
+Keep port 80 open even after HTTPS works so HTTP visitors can be redirected and ACME renewal can use HTTP validation. Your public application should use HTTPS.
 
-HTTP Strict Transport Security tells browsers to prefer HTTPS for a domain for a period of time. It is powerful because a wrong setting can make a domain unreachable until the browser’s policy expires.
+## HSTS
 
-Enable HSTS only after:
+HSTS tells browsers to remember that a domain should use HTTPS. It is powerful because client browsers enforce it after receiving the header.
 
-- HTTPS is stable.
-- Every hostname you include is HTTPS-capable.
-- You understand the consequences of `includeSubDomains`.
-- You have tested redirect behavior and certificate renewal.
+A safe progression:
 
-A cautious first value is often short-lived during testing, then increased deliberately. Do not copy `preload` settings casually.
+1. Verify HTTPS and redirect correctness.
+2. Start with a short `SECURE_HSTS_SECONDS` value.
+3. Verify all intended subdomains support HTTPS before enabling `includeSubDomains`.
+4. Do not use preload options casually; recovery from a mistake can be slow.
 
-# 18. UFW, SSH, Fail2Ban, and updates
+## Proxy-aware Django security
 
-## 18.1 The correct public port model
+When TLS terminates at the proxy, configure the proxy to set `X-Forwarded-Proto` and Django to trust it only when the app server is private. Then secure cookies and `SECURE_SSL_REDIRECT` behave consistently.
 
-For the guided architecture, external users need only:
+## What Certbot is doing
 
-| Port | Protocol | Reason |
-|---:|---|---|
-| 22 | TCP | SSH administration |
-| 80 | TCP | HTTP redirect and ACME validation |
-| 443 | TCP | HTTPS application traffic |
-
-Do **not** expose:
-
-| Port | Why it stays private |
-|---:|---|
-| 5432 | PostgreSQL is for the app/server, not browsers |
-| 8001 | Gunicorn is behind Apache |
-| 8000 | Django development server is not a public service |
-
-## 18.2 Safe UFW baseline
-
-Keep your current SSH session open while changing firewall policy.
+When you run:
 
 ```bash
-sudo ufw allow OpenSSH comment 'SSH administration'
-sudo ufw allow 80/tcp comment 'HTTP redirect and ACME validation'
-sudo ufw allow 443/tcp comment 'HTTPS application'
+sudo certbot --nginx -d <DOMAIN> -d <WWW_DOMAIN>
+```
 
+Certbot typically does four jobs:
+
+1. asks Let's Encrypt for a certificate for the listed names;
+2. proves control of those names, often through an HTTP challenge on port 80;
+3. stores certificate files on the server;
+4. updates the Nginx config if you use the Nginx plugin.
+
+The `-d` flags list every hostname that should appear on the certificate. A certificate for `example.com` does not automatically cover `www.example.com` unless both names are included or a wildcard certificate is used.
+
+## What can go wrong during certificate issuance
+
+| Symptom | Likely cause |
+|---|---|
+| DNS validation fails | domain does not point to this server yet |
+| connection timeout | provider firewall or UFW blocks port 80 |
+| wrong site answers | Nginx/Apache server block does not match `server_name`/vhost |
+| too many redirects | HTTP challenge is being redirected through a broken HTTPS path |
+| CDN interference | proxy/CDN is not forwarding the challenge as expected |
+
+Fix the path from the public internet to port 80 before rerunning repeatedly. Certificate authorities enforce rate limits.
+
+## Why port 80 usually stays open
+
+After HTTPS works, port 80 should not serve the application insecurely. It should redirect to HTTPS. Keeping it open is still useful because:
+
+- users who type `example.com` often start on HTTP;
+- ACME HTTP validation may need port 80;
+- redirects give a clean path to HTTPS.
+
+The important rule is not "close port 80." The important rule is "do not serve sensitive application traffic over plain HTTP."
+
+---
+
+<!-- Source: operations/02-firewall-ssh-and-host-security.md -->
+
+# 25. Firewall, SSH, Fail2Ban, and host security
+
+## UFW baseline
+
+From an existing SSH session, first permit SSH, then web traffic, then enable UFW:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw enable
-sudo ufw status verbose
+sudo ufw status numbered
 ```
 
-Why these defaults:
+Keep the SSH session open and test a second login before declaring success.
 
-- **Deny incoming:** unsolicited inbound connections are rejected unless explicitly allowed.
-- **Allow outgoing:** server components can fetch OS updates, packages, certificate renewals, and external APIs. Restrict outbound traffic later only when you understand every dependency.
+Do not mix UFW with a separate hand-managed native nftables ruleset unless you fully understand ownership of the firewall configuration. Choose one clear source of truth.
 
-UFW is Ubuntu’s simple host-firewall interface over the kernel packet-filtering system. [Ubuntu Firewall]
+## Provider firewall
 
-## 18.3 Fail2Ban
+Mirror the same inbound policy at the hosting provider: SSH, HTTP, HTTPS. The provider firewall is an outer boundary; UFW is a host boundary. One does not make the other useless.
 
-Fail2Ban reads logs and can temporarily ban addresses that repeatedly fail authentication patterns, such as SSH password attempts.
+## SSH hardening sequence
+
+1. Create and test SSH key login.
+2. Create a sudo-capable deploy user.
+3. Test another SSH session as that user.
+4. Disable root/password SSH login only after the key path is confirmed.
+5. Retain console/provider recovery access.
+
+Never apply a hardening recipe blindly while you have only one unverified way back into the server.
+
+## Fail2Ban
+
+Fail2Ban watches logs and temporarily bans repeated suspicious login failures. It is useful friction against basic brute force; it is not a replacement for keys and patched software.
+
+```bash
+sudo apt install -y fail2ban
+```
 
 Example SSH jail:
 
@@ -1376,332 +2572,502 @@ bantime = 1h
 Then:
 
 ```bash
-sudo systemctl enable --now fail2ban
+sudo systemctl restart fail2ban
 sudo fail2ban-client status sshd
 ```
 
-Fail2Ban is not a substitute for SSH keys and a firewall. It is a rate-limiting consequence layer.
+## Patch management
 
-## 18.4 Operating system updates
+Apply regular OS/package updates. Before large upgrades, have a backup and maintenance window. Security updates deserve priority, but update discipline includes verification—not just pressing upgrade and disappearing.
 
-Apply updates regularly. For many small VPSs, automatic security updates are worth enabling after you understand the provider/organization’s maintenance policy:
+## Filesystem and process principles
 
-```bash
-sudo dpkg-reconfigure --priority=low unattended-upgrades
+- app processes run as non-root;
+- production secrets are not world-readable;
+- code is not edited casually on the server;
+- database is private;
+- reverse proxy is the only public application entry point;
+- logs are reviewed, not ignored;
+- backups are off-host;
+- file uploads are treated as untrusted input and never executed as server-side code.
+
+---
+
+<!-- Source: operations/03-deployment-runbooks.md -->
+
+# 26. Safe deployments, migrations, and rollbacks
+
+A deployment should be a documented operation, not a memory test.
+
+## Standard workflow
+
+```text
+local branch
+→ tests/checks
+→ commit
+→ push to Git remote
+→ inspect server state
+→ pull exact code as deploy user
+→ migrate if needed
+→ collectstatic if needed
+→ restart/reload service
+→ smoke test
+→ monitor logs
 ```
 
-Still schedule manual maintenance: automatic updates do not replace checking service health, disk space, renewal, backups, or application dependencies.
+## Before deployment
 
-## 18.5 Security baseline versus security theater
-
-High-value controls for a small Django VPS:
-
-- SSH keys and no SSH root/password login after verified access.
-- Separate deploy and app users.
-- Protected environment file.
-- `DEBUG=False`.
-- Private database and Gunicorn ports.
-- UFW with only 22/80/443 inbound.
-- Updates and Fail2Ban.
-- HTTPS plus renewal test.
-- Backups plus restore drill.
-- Least privilege and readable logs.
-
-Lower-value or misleading habits:
-
-- Changing SSH port alone and calling the server secure.
-- Randomly adding headers without testing their application effect.
-- Exposing PostgreSQL “because it is password-protected.”
-- `chmod -R 777`.
-- Disabling CSRF to “fix” a form error.
-- Treating a same-server backup as sufficient disaster recovery.
-
-<div class="chapter-break"></div>
-
-# Part VII - Day-2 operations
-
-# 19. Normal deployment workflow
-
-The live server should **pull approved code**. It should not become the primary place where code is authored and committed.
-
-## 19.1 Before deployment
-
-Local computer:
+Locally:
 
 ```bash
 python manage.py test
-python manage.py check --deploy
-python manage.py makemigrations --check --dry-run
-git status --short --branch
-git push origin main
+python manage.py check
+git status --short
+git diff --check
+git log -1 --oneline
 ```
 
-## 19.2 Inspect, then pull
-
-On the server, as `deploy`:
+On server:
 
 ```bash
-sudo -u deploy -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp/app
-
+sudo -u <DEPLOY_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
 git status --short --branch
 git fetch origin
 git log --oneline HEAD..origin/main
 '
 ```
 
-Why inspect first:
+If the server working tree is dirty, understand why before pulling. Do not normalize `git reset --hard` as a deployment tool; it can erase uncommitted server state and hide process problems.
 
-- A dirty server working tree can block a pull or hide manual drift.
-- Seeing incoming commits helps decide whether you need migrations, static collection, dependency installation, or a simple restart.
-- `git pull --ff-only` avoids creating an automatic merge commit on production. It either advances cleanly or stops.
-
-## 19.3 Standard deploy runbook
+## Pull code safely
 
 ```bash
-sudo -u deploy -H bash -lc '
+sudo -u <DEPLOY_USER> -H bash -lc '
 set -Eeuo pipefail
-cd /srv/myapp/app
-
+cd /srv/<APP_NAME>/app
 git pull --ff-only origin main
-/srv/myapp/venv/bin/pip install -r requirements.txt
 '
-
-sudo -u myapp -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp/app
-set -a
-. /etc/myapp/myapp.env
-set +a
-
-/srv/myapp/venv/bin/python manage.py check
-/srv/myapp/venv/bin/python manage.py migrate --noinput
-/srv/myapp/venv/bin/python manage.py collectstatic --noinput
-'
-
-sudo systemctl restart myapp-gunicorn
-sudo apache2ctl configtest
-sudo systemctl reload apache2
 ```
 
-This is a safe generalized runbook, but it is useful to understand when each item is needed:
+`--ff-only` prevents Git from creating an unexpected merge commit on the server. It stops when history cannot advance safely.
 
-| Change type | Must run | Why |
-|---|---|---|
-| Python/template code | restart Gunicorn | workers have old code in memory |
-| New migration files | `migrate` | apply reviewed schema changes |
-| CSS/JS/static assets | `collectstatic` | copy collected output for Apache |
-| New Python dependency | `pip install -r requirements.txt` + restart Gunicorn | virtualenv must contain package |
-| Apache configuration | `apache2ctl configtest` + reload Apache | validate and apply web-server rules |
-| Environment file | restart Gunicorn | service must reload injected variables |
-| Only documentation | Git pull only | runtime behavior unchanged |
-
-Running `collectstatic` and `migrate` repeatedly is usually safe when configured correctly, but do not turn them into rituals you do not understand. Know why you are invoking each command.
-
-## 19.4 Verification after deploy
+## Apply Django-level changes as the app user
 
 ```bash
-sudo systemctl --no-pager --full status myapp-gunicorn
-sudo systemctl --no-pager --full status apache2
-curl -fsS https://example.com/healthz/
-sudo -u deploy -H bash -lc 'cd /srv/myapp/app && git log -1 --oneline'
+sudo -u <APP_USER> -H bash -lc '
+set -Eeuo pipefail
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py check
+/srv/<APP_NAME>/venv/bin/python manage.py migrate --noinput
+/srv/<APP_NAME>/venv/bin/python manage.py collectstatic --noinput
+'
 ```
 
-Then test a critical user path manually:
+Run `migrate` when the release includes migrations; run `collectstatic` when static sources/settings changed. They are not magic rituals required for every Python edit.
+
+## Reload the running app
+
+For Gunicorn/Uvicorn under systemd:
+
+```bash
+sudo systemctl restart <APP_NAME>
+```
+
+For Apache/Nginx config edits:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+# or
+sudo apache2ctl configtest && sudo systemctl reload apache2
+```
+
+## Post-deploy verification
+
+```bash
+curl -fsS https://<DOMAIN>/healthz/
+curl -I https://<DOMAIN>/
+sudo systemctl --no-pager --full status <APP_NAME>
+sudo journalctl -u <APP_NAME> -n 50 --no-pager
+```
+
+Then manually test the critical user path that changed.
+
+## Rollback philosophy
+
+A clean rollback needs an earlier known-good Git commit/tag and an understanding of database compatibility. Code can often roll back quickly; schema/data changes may not. For risky migrations, plan a forward fix, a restore path, or a two-step compatible deployment rather than assuming `git checkout` solves every outage.
+
+## Why the runbook uses `sudo -u ... bash -lc`
+
+Many deployment commands must run as a specific Linux identity.
+
+```bash
+sudo -u <DEPLOY_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+git pull --ff-only origin main
+'
+```
+
+Read it piece by piece:
+
+| Piece | Meaning |
+|---|---|
+| `sudo -u <DEPLOY_USER>` | run the command as the deploy user, not root |
+| `-H` | use that user's home directory environment |
+| `bash -lc` | start a login-like shell and run the quoted commands |
+| `cd /srv/<APP_NAME>/app` | move into the repository |
+| `git pull --ff-only origin main` | update only if Git can move forward without a merge commit |
+
+The same pattern appears with `<APP_USER>` for Django commands because migrations and checks should run with the same environment and permissions as the application service.
+
+## Why `set -Eeuo pipefail` appears in scripts
+
+```bash
+set -Eeuo pipefail
+```
+
+This makes shell scripts fail earlier and more honestly:
+
+| Option | Meaning |
+|---|---|
+| `-E` | preserve error traps in functions/subshells when used |
+| `-e` | stop when a command fails |
+| `-u` | fail when an unset variable is used |
+| `-o pipefail` | fail a pipeline if any important command in it fails |
+
+Without this, a script can keep going after a failed command and make the server state confusing.
+
+## What each Django deploy command does
+
+```bash
+/srv/<APP_NAME>/venv/bin/python manage.py check
+```
+
+Runs Django's system checks. It catches many configuration mistakes before the app restarts.
+
+```bash
+/srv/<APP_NAME>/venv/bin/python manage.py migrate --noinput
+```
+
+Applies unapplied database migrations. `--noinput` prevents the command from waiting for keyboard input during an automated deployment.
+
+```bash
+/srv/<APP_NAME>/venv/bin/python manage.py collectstatic --noinput
+```
+
+Copies static assets from apps and project directories into `STATIC_ROOT`, where the web server can serve them.
+
+## Beginner rollback examples
+
+If the new code is bad but the database is still compatible, a simple rollback may be:
+
+```bash
+sudo -u <DEPLOY_USER> -H bash -lc '
+set -Eeuo pipefail
+cd /srv/<APP_NAME>/app
+git checkout <KNOWN_GOOD_COMMIT>
+'
+sudo systemctl restart <APP_NAME>
+```
+
+If migrations changed the database in a non-compatible way, code rollback may not be enough. You may need a forward fix, a reverse migration that was designed and tested, or a database restore. This is why risky migrations need a deployment plan before they reach production.
+
+---
+
+<!-- Source: operations/04-observability-and-incidents.md -->
+
+# 27. Logging, monitoring, and incident response
+
+## Logs are evidence
+
+| Layer | Where to inspect |
+|---|---|
+| Gunicorn/Uvicorn systemd service | `journalctl -u <APP_NAME>` |
+| Nginx | `/var/log/nginx/access.log`, `/var/log/nginx/error.log` or vhost logs |
+| Apache | `/var/log/apache2/*access.log`, `*error.log` |
+| PostgreSQL | distro/service log or `journalctl -u postgresql` |
+| Django application errors | app-server journal/structured error tracking |
+
+## Debug an HTTP 500
+
+1. Reproduce the request once.
+2. Follow the application service journal.
+3. Read the traceback, not random old log entries.
+4. Identify whether configuration, code, database, permissions, or an external dependency failed.
+5. Fix locally and add a regression test when practical.
+6. Deploy a narrow verified fix.
+
+```bash
+sudo journalctl -u <APP_NAME> -f
+```
+
+## Debug a 502
+
+A `502 Bad Gateway` typically means the proxy reached its own process but cannot get a valid response from the upstream app server.
+
+Check:
+
+```bash
+sudo systemctl status <APP_NAME>
+curl -I http://127.0.0.1:8000/
+sudo tail -n 100 /var/log/nginx/error.log
+```
+
+## Structured application logging
+
+Plain tracebacks are useful, but production logs should also answer operational questions. Include request ID, release version, user/account identifier when safe, endpoint, status code, latency, and external dependency name. Never log passwords, tokens, session cookies, full credit-card data, or private payloads.
+
+A practical flow is:
 
 ```text
-home -> sign up/login -> create object -> admin workflow -> public detail page -> logout
+request enters proxy
+  -> request ID is assigned or preserved
+  -> Django includes it in logs/errors
+  -> error tracker links traceback to release
+  -> deployment history shows what changed
 ```
 
-## 19.5 Rollback philosophy
+## Metrics, alerts, and dashboards
 
-A rollback should mean “return code to a known good Git commit/tag,” not “randomly edit files on the server.”
+Metrics are numeric signals over time. Alerts are rules that notify a human when a signal needs action. Dashboards are for investigation; they are not a substitute for alerts.
 
-Safer approaches:
+Useful starter alerts:
 
-- Revert the bad commit locally, test, push, then deploy.
-- Deploy a known good tag/commit after carefully considering migrations.
-- Restore database data only when the data state itself is bad; code rollback and database rollback are separate decisions.
+| Alert | Why it matters |
+|---|---|
+| HTTPS health check fails | users may not reach the app |
+| repeated 5xx responses | app or dependency is failing |
+| disk usage above threshold | logs/uploads/database can stop the server |
+| certificate expires soon | HTTPS outage is predictable and preventable |
+| backup job failed | recovery point objective is at risk |
+| service restart loop | systemd is keeping a broken process alive |
+| database connection exhaustion | requests may fail even while CPU looks fine |
 
-Migrations complicate rollback. A schema/data migration may not be safely reversible. Plan and test important migrations before production.
+## Tool choices
 
-# 20. Backups and restoration
+Common options:
 
-A backup you have never restored is only a hypothesis.
+| Tool | Typical use |
+|---|---|
+| Sentry | Django exception tracking, releases, performance samples |
+| UptimeRobot/Better Stack/Pingdom | external uptime checks |
+| Prometheus | metrics collection and alert rules |
+| Grafana | metrics dashboards |
+| Netdata | quick host-level visibility |
+| systemd journal | first source for service logs on a VPS |
 
-## 20.1 PostgreSQL custom-format dump
+Use managed tools when they reduce operational load. Self-host monitoring only when you can also monitor, back up, upgrade, and secure the monitoring system.
+
+## Monitoring layers
+
+A useful small-app stack:
+
+- external uptime monitor requests `/healthz/` over HTTPS;
+- application error tracking reports uncaught exceptions with release/version metadata;
+- system monitoring tracks CPU, memory, disk, service restarts, certificate expiry, backup success;
+- database monitoring tracks connections, disk growth, slow queries when needed.
+
+Monitoring does not prevent every failure. It reduces time-to-detection and gives you evidence.
+
+## Incident response outline
+
+```text
+1. Detect: monitor/user/log alert.
+2. Triage: scope, severity, last deploy, affected endpoint.
+3. Contain: stop harmful action or roll back safe code.
+4. Recover: restore service/data as needed.
+5. Verify: health check + critical flow.
+6. Learn: root cause, regression test, runbook/document update.
+```
+
+Avoid changing five unrelated variables while debugging. That destroys the evidence needed to understand the actual cause.
+
+## Post-incident review
+
+After recovery, write a short review while the evidence is fresh:
+
+- impact window and affected users;
+- triggering change or external event;
+- detection source;
+- what worked during response;
+- what slowed response;
+- permanent fixes, tests, alerts, or docs to add;
+- owner and due date for each follow-up.
+
+The point is not blame. The point is to make the next failure smaller, faster to detect, or easier to recover from.
+
+---
+
+<!-- Source: operations/05-backups-and-disaster-recovery.md -->
+
+# 28. Backups, restore drills, and disaster recovery
+
+A backup is only useful if it can be restored. A backup stored only on the same VPS is not sufficient for full server loss.
+
+## What to back up
+
+- PostgreSQL database dumps;
+- user media/uploads if stored locally;
+- protected environment files/secrets through a secure, documented recovery method;
+- deployment config templates and service definitions (ideally Git, minus secrets);
+- certificate material only if you have a reason; certificates can often be reissued, but account/config recovery matters.
+
+## PostgreSQL custom-format dump
 
 ```bash
 sudo -u postgres pg_dump \
   --format=custom \
   --no-owner \
   --no-privileges \
-  --file=/var/backups/myapp/postgresql/myapp-$(date -u +%Y-%m-%dT%H%M%SZ).dump \
-  myapp
+  --file=/var/backups/<APP_NAME>/postgresql/<APP_NAME>-$(date -u +%Y%m%dT%H%M%SZ).dump \
+  <DB_NAME>
 ```
 
-Why custom format:
-
-- It works with `pg_restore`.
-- You can inspect it, restore selected objects, and often restore in parallel.
-- PostgreSQL documents custom/directory archive formats as flexible dump/restore mechanisms. [PostgreSQL Backup]
-
-Verify immediately:
+Verify the dump is readable:
 
 ```bash
-sudo -u postgres pg_restore --list /var/backups/myapp/postgresql/myapp-YYYY-MM-DDTHHMMSSZ.dump >/dev/null
+sudo -u postgres pg_restore --list /var/backups/<APP_NAME>/postgresql/<FILE>.dump > /dev/null
 ```
 
-## 20.2 What to back up
+## Restore drill into a separate database
 
-| Asset | Backup method |
-|---|---|
-| PostgreSQL database | `pg_dump` archive, verified with `pg_restore --list` |
-| Media uploads | rsync/object storage/archive snapshot |
-| Environment file | encrypted secure copy, not Git |
-| Apache/systemd config | source-controlled templates plus secure server config backup |
-| DNS records | documented export/screenshot/runbook |
-| Git code | remote repository and tags |
-
-## 20.3 Off-server copies are mandatory for real recovery
-
-A disk failure, provider account problem, accidental server deletion, or ransomware event can remove the application and its same-server backups together.
-
-Use at least one off-server destination:
-
-- encrypted cloud storage,
-- another server,
-- a secure local disk,
-- object storage.
-
-Apply the **3-2-1 idea** where practical: three copies, two media/location types, one copy off-site.
-
-## 20.4 Restore drill into a separate database
-
-Never start a learning restore by overwriting production.
+Never first test a restore by overwriting production:
 
 ```bash
-sudo -u postgres createdb --owner=myapp_db myapp_restore_test
+sudo -u postgres createdb <DB_NAME>_restore_test
 sudo -u postgres pg_restore \
+  --dbname=<DB_NAME>_restore_test \
   --no-owner \
   --no-privileges \
-  --dbname=myapp_restore_test \
-  /var/backups/myapp/postgresql/myapp-YYYY-MM-DDTHHMMSSZ.dump
+  /var/backups/<APP_NAME>/postgresql/<FILE>.dump
 ```
 
-Then inspect the test database and drop it when finished:
+Inspect it, then remove the test database when done.
+
+## Nightly systemd backup service
+
+```ini
+# /etc/systemd/system/<APP_NAME>-db-backup.service
+[Unit]
+Description=<APP_NAME> PostgreSQL backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+UMask=0077
+ExecStart=/usr/local/sbin/<APP_NAME>-db-backup
+```
+
+```ini
+# /etc/systemd/system/<APP_NAME>-db-backup.timer
+[Unit]
+Description=Nightly <APP_NAME> PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+Unit=<APP_NAME>-db-backup.service
+
+[Install]
+WantedBy=timers.target
+```
+
+`Persistent=true` means a missed run can be triggered after the machine comes back up.
+
+## Off-server copy
+
+Send encrypted backups to a different failure domain: object storage, another server, encrypted local storage, or a managed backup destination. Test the path and record retention policy.
+
+## Disaster recovery questions
+
+You should be able to answer:
+
+- Where is the latest verified DB backup?
+- Where are media files backed up?
+- How do we restore a new server from Git + config + DB + media?
+- Who can access the secrets needed to start the service?
+- What is the acceptable data-loss window (RPO)?
+- How quickly must service return (RTO)?
+
+If there is no answer, the system has a recovery risk—not merely a documentation gap.
+
+## Explain the `pg_dump` flags
 
 ```bash
-sudo -u postgres dropdb myapp_restore_test
+sudo -u postgres pg_dump   --format=custom   --no-owner   --no-privileges   --file=/var/backups/<APP_NAME>/postgresql/<APP_NAME>-$(date -u +%Y%m%dT%H%M%SZ).dump   <DB_NAME>
 ```
 
-## 20.5 Nightly systemd timer concept
+Line by line:
 
-A timer is systemd’s scheduled-job mechanism. It starts a service unit at a defined time and can catch up after missed runs when configured persistently.
-
-The correct backup job pattern is:
-
-```text
-systemd timer -> one-shot backup service -> pg_dump custom archive -> verify archive -> retention cleanup -> off-server copy
-```
-
-Do not rely on a timer you have never manually triggered and checked.
-
-# 21. Logs and monitoring
-
-## 21.1 Where to look first
-
-| Layer | Command / location |
+| Part | Meaning |
 |---|---|
-| Gunicorn/Django service | `sudo journalctl -u myapp-gunicorn -f` |
-| Gunicorn recent errors | `sudo journalctl -u myapp-gunicorn -n 200 --no-pager` |
-| Apache service | `sudo systemctl status apache2` |
-| Apache app access log | `/var/log/apache2/myapp-ssl-access.log` |
-| Apache app error log | `/var/log/apache2/myapp-ssl-error.log` |
-| PostgreSQL service | `sudo systemctl status postgresql` |
-| PostgreSQL logs | distribution/version-specific journal/log location |
-| Firewall | `sudo ufw status verbose` and configured logs |
+| `sudo -u postgres` | run as the PostgreSQL operating-system admin user |
+| `pg_dump` | create a logical backup of a database |
+| `--format=custom` | use PostgreSQL's custom archive format, which works well with `pg_restore` |
+| `--no-owner` | do not force restore ownership to the original database owner |
+| `--no-privileges` | do not restore original grant statements automatically |
+| `--file=...` | write the backup to this file |
+| `$(date -u ...)` | put a UTC timestamp in the filename so backups do not overwrite each other |
+| `<DB_NAME>` | the database to dump |
 
-## 21.2 Debugging sequence for HTTP 500
+The command backs up database contents, not local media files and not environment files. Those need separate backup paths.
 
-1. Reproduce the exact user action once.
-2. Follow Gunicorn journal logs.
-3. Read the traceback, not just the final HTTP status.
-4. Identify source file/line and failing dependency/data condition.
-5. Fix locally and add a regression test.
-6. Deploy with the standard runbook.
+## What a restore drill proves
 
-Do not set `DEBUG=True` on production just to get a traceback in a browser. That can leak paths, settings, and sensitive context.
+A restore drill proves more than "the file exists." It proves:
 
-## 21.3 Uptime monitoring
+- the backup file is readable;
+- the PostgreSQL version can restore it;
+- the restore command is documented correctly;
+- the database has enough disk space;
+- operators know the steps before an emergency;
+- the backup contains what the application actually needs.
 
-An external uptime monitor should request a simple route such as:
+Do restore drills into a separate test database. Never practice by overwriting production.
 
-```text
-https://example.com/healthz/
-```
+## RPO and RTO in plain language
 
-It catches DNS, certificate, firewall, Apache, Gunicorn, and broad application outages from outside the server.
+RPO means "how much data can we afford to lose?" If backups run nightly, your worst normal loss may be close to 24 hours of database changes.
 
-Error tracking tools such as Sentry complement uptime monitoring: they capture application exceptions with context. They do not replace tests or backups.
+RTO means "how long can the service be down while we recover?" If rebuilding a VPS from scratch takes four hours, your real RTO is not five minutes.
 
-<div class="chapter-break"></div>
+These are business decisions, not only technical settings. A hobby blog and a paid SaaS product should not have the same recovery promises.
 
-# Part VIII - Test before users discover bugs
+---
 
-# 22. The testing ladder
+<!-- Source: operations/06-testing-ci-staging.md -->
 
-No single tool can prove a whole website has no bugs. Build layers.
+# 29. Testing, CI, staging, and smoke tests
 
-| Layer | Example | Catches |
+## Testing ladder
+
+| Level | What it proves | Example |
 |---|---|---|
-| Unit tests | model method, utility function | small logic errors |
-| Django integration tests | URL/view/form/database assertion | app-layer behavior |
-| Migration tests/checks | migration exists and applies | schema drift |
-| Browser end-to-end tests | Playwright signs up, posts, clicks links | broken user flows, JavaScript, redirects |
-| Staging smoke tests | feature branch in isolated environment | production-like integration issues |
-| Production smoke test | health endpoint + critical manual flow | deploy/config regressions |
-| Monitoring | uptime/error tracking | real failures after release |
+| Unit test | isolated logic | slug generation, helper function |
+| Model/view integration test | Django components work together | published post URL returns 200 |
+| Browser/E2E test | critical user behavior in a real browser | signup → post → admin publish → public open |
+| Staging test | production-like infrastructure behavior | proxy/TLS/static/migrations on separate app+DB |
+| Production smoke test | deployed release answers basic requests | `/healthz/`, login page, one critical flow |
 
-## 22.1 Regression tests are operational memory
+## Regression tests are operational memory
 
-When you fix a real bug, add a test that would fail if the bug returns.
+Every production bug that is inexpensive to encode should become a regression test. It turns a painful incident into protection against repeating it.
 
-Examples from a blog-like Django project:
+Examples for a blog app:
 
-- Publishing sets `pub_date`.
-- A published post’s generated URL returns HTTP 200.
-- Draft cards link to edit rather than a nonpublic detail route.
-- A post near midnight uses the project’s local calendar date consistently.
-- Slug generation produces a unique stable URL.
+- publishing assigns `pub_date`;
+- public post URLs use the intended local calendar date;
+- drafts do not build a public detail URL;
+- a normal user cannot edit another user’s post;
+- CSRF-protected forms accept valid HTTPS-origin submissions.
 
-The value is not only correctness today. The test explains why a line of code exists months later.
-
-## 22.2 Staging is not production with another name
-
-A proper staging environment should have:
-
-- a separate hostname such as `staging.example.com`,
-- a separate code checkout/branch,
-- a separate database,
-- separate media/static paths,
-- separate secrets,
-- restricted email behavior (test inbox or disabled sending),
-- its own Gunicorn systemd service and Apache virtual host.
-
-Never test destructive migrations, real email sends, or incomplete features against production data just because the server is convenient.
-
-## 22.3 CI with GitHub Actions
-
-Continuous integration runs validation automatically for pushes and pull requests. GitHub Actions can run Python tests and checks from a workflow in the repository. [GitHub Actions]
-
-Minimal example:
+## GitHub Actions example
 
 ```yaml
 # .github/workflows/ci.yml
 name: Django CI
-
 on:
   push:
   pull_request:
@@ -1716,306 +3082,838 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: python manage.py test
       - run: python manage.py check
+      - run: python manage.py test
 ```
 
-Real projects may need test-only environment variables and a PostgreSQL service. Start with a workflow that actually passes and improve it deliberately.
+Real projects may need a PostgreSQL service container and CI-only environment variables. Keep credentials test-only and do not copy production secrets into CI.
 
-# 23. The migration path to larger systems
+## Staging
 
-A single VPS is a good starting architecture for many small/medium applications. Scale when evidence demands it.
-
-Possible next stages:
+A staging environment should be isolated:
 
 ```text
-Stage 1: one VPS
-Apache + Gunicorn + Django + PostgreSQL
-
-Stage 2: separate backup destination and monitoring
-
-Stage 3: staging environment
-
-Stage 4: managed PostgreSQL or separate database server
-
-Stage 5: multiple application servers behind a load balancer
-
-Stage 6: object storage/CDN for static/media
-
-Stage 7: queue workers/cache/search service as actual workload requires
+staging.example.com
+separate app checkout/service
+separate environment file
+separate database
+separate media/static location
+safe test email recipient/backend
 ```
 
-Do not add Redis, Celery, Kubernetes, multiple databases, or a CDN merely because a popular architecture diagram includes them. Every component adds configuration, failure modes, upgrade work, and monitoring needs.
+Do not point a feature branch at production data to “test for real.” Test migrations and POST actions against staging data. Production-like does not mean production-coupled.
 
-<div class="chapter-break"></div>
+## Browser tests
 
-# Part IX - Reference configurations
-
-# 24. A complete minimal reference set
-
-## 24.1 `requirements.txt`
+Playwright is a strong choice for real browser flows. Begin with one critical journey, not an enormous flaky suite:
 
 ```text
-Django==<tested-version>
-psycopg[binary]==<tested-version>
-gunicorn==<tested-version>
+sign up → log in → create record → privileged publish/approve → public URL opens → dashboard works
 ```
 
-## 24.2 `.env.example`
+## Production smoke tests
+
+After each deploy, run a short, repeatable smoke check. It should be fast enough that you actually do it.
+
+---
+
+<!-- Source: operations/07-scaling.md -->
+
+# 30. Scaling without premature complexity
+
+Scaling is not only adding servers. First identify the bottleneck.
+
+| Symptom | Possible response |
+|---|---|
+| Slow queries | indexes, query profiling, pagination, DB tuning |
+| CPU-bound app work | optimize code, worker tuning, move background work |
+| External API latency | timeouts, retries, background jobs, caching |
+| Static bandwidth | CDN/object storage/cache headers |
+| Long-running tasks | Celery/RQ/Huey + worker queue |
+| Many concurrent WebSockets | ASGI design, connection capacity, Redis/channel layer |
+| Single-server failure risk | backups, replica/managed DB, load balancer, multi-instance app |
+
+## Add background workers when work should not block a web request
+
+Email sending, report generation, image processing, and slow external calls are candidates. A queue stack commonly includes:
+
+```text
+Django web request → broker (Redis/RabbitMQ) → worker process → result/storage
+```
+
+That adds a new service, credentials, monitoring, and failure behavior. Add it when it solves a demonstrated problem.
+
+## Cache carefully
+
+Caching can reduce database work and improve latency. It can also make invalidation, authorization, and stale data harder. Start with clear targets: expensive public list page, repeated computed result, static assets through CDN.
+
+## Horizontal app scaling
+
+Once the app is stateless at the process layer—sessions/cache/uploads handled appropriately—you can run multiple app instances behind a load balancer. Database writes and migration coordination become more important. Do not scale code while neglecting database capacity and backups.
+
+## The evolution rule
+
+Add a component only when you can answer:
+
+1. Which concrete bottleneck does it solve?
+2. What new operational responsibility does it create?
+3. How will it be monitored, backed up, upgraded, and recovered?
+
+## Common growth stages
+
+A simple beginning is often the most reliable architecture:
+
+```text
+One VPS
+  -> reverse proxy
+  -> Gunicorn/Uvicorn
+  -> Django
+  -> PostgreSQL
+```
+
+A medium architecture separates public web capacity from the data layer:
+
+```text
+Load balancer
+  -> Django instance A
+  -> Django instance B
+  -> shared PostgreSQL
+  -> shared Redis/cache/broker
+  -> shared media/object storage
+```
+
+A larger architecture may use managed databases, object storage, CDN, container orchestration, private networks, read replicas, and specialized worker pools. Kubernetes belongs here only when orchestration solves more problems than it creates.
+
+## Make the app stateless before adding app servers
+
+Multiple app servers require shared state:
+
+| State | Single-server shortcut | Multi-server answer |
+|---|---|---|
+| sessions | local memory | database/cache/signed-cookie sessions |
+| media files | local disk | object storage or shared volume |
+| cache | local memory | Redis/Memcached/shared cache |
+| background jobs | local process | shared broker and worker fleet |
+| migrations | manual on server | one coordinated deployment step |
+
+If this work is skipped, a load balancer can make bugs intermittent: uploads appear on one server, sessions disappear on another, and workers fight over duplicated jobs.
+
+## Database scaling comes first for many Django apps
+
+Most Django bottlenecks eventually touch the database. Before adding app instances, check indexes, query counts, pagination, transaction length, connection count, and backup/restore capacity. A single poorly shaped query can overload a large database; a small index can outperform a new server.
+
+## Zero-downtime deployment concepts
+
+Zero downtime means users can continue making successful requests while code changes. It usually requires:
+
+- backwards-compatible migrations;
+- health checks;
+- draining old workers before killing them;
+- a load balancer or process manager that only routes to healthy instances;
+- rollback that matches the database state.
+
+Blue/green deployment runs two environments and switches traffic. Rolling deployment replaces instances gradually. Both need compatible code and data. They are deployment disciplines, not magic buttons.
+
+## When to choose managed services
+
+Managed databases, Redis, object storage, CDN, and email providers are often cheaper than operating those systems poorly. The trade-off is vendor limits, network design, access policy, billing, and migration planning. Document every managed dependency the same way you document a VPS.
+
+---
+
+<!-- Source: open-source/01-publishing-a-project.md -->
+
+# 31. Publishing an open-source project
+
+Public code is not automatically an open-source project. A usable public project needs a license, accurate setup instructions, contribution expectations, and a security path.
+
+## Before making a repository public
+
+- remove secrets from current files and Git history where necessary;
+- confirm `.env`, private keys, database dumps, uploads, and local config are ignored;
+- replace real values with `.env.example` placeholders;
+- include a license;
+- write a README that explains what the project does and how to run it;
+- add a security reporting policy;
+- document supported Python/Django/database versions;
+- ensure screenshots/test content do not leak private data;
+- run secret scanning or at minimum search tracked history/files.
+
+## Secret checks
+
+```bash
+git grep -nEi 'secret|password|token|api[_-]?key|private[_-]?key' || true
+git ls-files | grep -E '(^|/)(\.env|.*\.pem|.*\.key)$' || true
+```
+
+These are not complete secret scanners, but they create a useful review habit.
+
+## README outline
+
+```md
+# Project Name
+
+One-paragraph purpose statement.
+
+## Features
+## Screenshots / demo
+## Quick start
+## Configuration
+## Local development
+## Testing
+## Production deployment
+## Contributing
+## Security
+## License
+```
+
+## `.env.example`
+
+A new contributor needs to know variable names without receiving real values:
 
 ```dotenv
-DJANGO_SECRET_KEY='replace-me'
-DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=example.com,www.example.com
-DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com,https://www.example.com
-DJANGO_USE_HTTPS=True
-POSTGRES_DB=myapp
-POSTGRES_USER=myapp_db
-POSTGRES_PASSWORD='replace-me'
+DJANGO_SECRET_KEY=replace-me-for-local-development
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+POSTGRES_DB=myproject
+POSTGRES_USER=myproject
+POSTGRES_PASSWORD=replace-me
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5432
 ```
 
-## 24.3 systemd Gunicorn unit
+## Documentation-as-code
 
-```ini
-[Unit]
-Description=Gunicorn application server for myapp
-After=network.target
-
-[Service]
-User=myapp
-Group=myapp
-WorkingDirectory=/srv/myapp/app
-EnvironmentFile=/etc/myapp/myapp.env
-Environment="PATH=/srv/myapp/venv/bin"
-ExecStart=/srv/myapp/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 --access-logfile - --error-logfile - myproject.wsgi:application
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## 24.4 Apache HTTPS virtual host
-
-```apache
-<IfModule mod_ssl.c>
-<VirtualHost *:443>
-    ServerName example.com
-    ServerAlias www.example.com
-
-    SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/example.com/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/example.com/privkey.pem
-
-    ProxyPreserveHost On
-    RequestHeader set X-Forwarded-Proto "https"
-
-    ProxyPass /static/ !
-    Alias /static/ /srv/myapp/staticfiles/
-    <Directory /srv/myapp/staticfiles>
-        Require all granted
-    </Directory>
-
-    ProxyPass /media/ !
-    Alias /media/ /srv/myapp/media/
-    <Directory /srv/myapp/media>
-        Require all granted
-    </Directory>
-
-    ProxyPass / http://127.0.0.1:8001/
-    ProxyPassReverse / http://127.0.0.1:8001/
-
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    Header always set X-Frame-Options "DENY"
-
-    ErrorLog ${APACHE_LOG_DIR}/myapp-ssl-error.log
-    CustomLog ${APACHE_LOG_DIR}/myapp-ssl-access.log combined
-</VirtualHost>
-</IfModule>
-```
-
-## 24.5 Firewall baseline
-
-```bash
-sudo ufw allow OpenSSH comment 'SSH administration'
-sudo ufw allow 80/tcp comment 'HTTP redirect and ACME validation'
-sudo ufw allow 443/tcp comment 'HTTPS application'
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw enable
-sudo ufw status numbered
-```
-
-## 24.6 Safe deployment command sequence
-
-```bash
-# Inspect first
-sudo -u deploy -H bash -lc '
-cd /srv/myapp/app
-git status --short --branch
-git fetch origin
-git log --oneline HEAD..origin/main
-'
-
-# Pull code
-sudo -u deploy -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp/app
-git pull --ff-only origin main
-/srv/myapp/venv/bin/pip install -r requirements.txt
-'
-
-# Apply app-level changes as the service user
-sudo -u myapp -H bash -lc '
-set -Eeuo pipefail
-cd /srv/myapp/app
-set -a
-. /etc/myapp/myapp.env
-set +a
-/srv/myapp/venv/bin/python manage.py check
-/srv/myapp/venv/bin/python manage.py migrate --noinput
-/srv/myapp/venv/bin/python manage.py collectstatic --noinput
-'
-
-# Reload services
-sudo systemctl restart myapp-gunicorn
-sudo apache2ctl configtest
-sudo systemctl reload apache2
-```
-
-## 24.7 Safe diagnostic commands
-
-```bash
-# Service state
-sudo systemctl status myapp-gunicorn apache2 postgresql
-
-# Follow app errors
-sudo journalctl -u myapp-gunicorn -f
-
-# Apache logs
-sudo tail -F /var/log/apache2/myapp-ssl-access.log /var/log/apache2/myapp-ssl-error.log
-
-# Firewall
-sudo ufw status verbose
-
-# Certificate renewal test
-sudo certbot renew --dry-run
-
-# Current deployed commit
-sudo -u deploy -H bash -lc 'cd /srv/myapp/app && git log -1 --oneline'
-```
-
-<div class="chapter-break"></div>
-
-# 25. Common mistakes and the correct mental model
-
-| Mistake | Why it happens | Better model |
-|---|---|---|
-| Running `runserver` publicly | It worked locally | Development convenience is not a production process manager |
-| Running Django as root | Root avoids a permission error temporarily | Fix ownership; run the app as a restricted service user |
-| Opening port 5432 | “The app needs the database” | The app on localhost needs it; browsers do not |
-| Opening port 8000/8001 | “The app server must be reachable” | Apache reaches Gunicorn locally; public users reach Apache only |
-| `chmod -R 777` | File permission debugging is frustrating | Model owner/group/read/write needs deliberately |
-| Committing `.env` | Local convenience | Commit `.env.example`; inject real secrets outside Git |
-| Editing code on production | Fast emergency fix | Fix locally, test, commit, deploy; document emergency changes |
-| Pulling with a dirty server tree | Manual drift accumulated | Keep production code clean; use a controlled config location |
-| Always running every command | Ritual | Use migrations/static/dependency steps because a change requires them |
-| Disabling CSRF | Form submission gave 403 | Diagnose origin, cookies, HTTPS/proxy header, template token |
-| Treating local backup as enough | “There is a dump on the server” | A server loss removes it too; copy off-server and test restore |
-| Moving tags | A prior beta was imperfect | Tags are historical snapshots; release a new tag |
-
-# 26. Final operational checklists
-
-## 26.1 Before first public launch
-
-- [ ] Domain DNS points to the intended server.
-- [ ] HTTPS certificate covers required hostnames.
-- [ ] HTTP redirects to HTTPS.
-- [ ] `DEBUG=False`.
-- [ ] `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` are correct.
-- [ ] Secrets are outside Git and protected by filesystem permissions.
-- [ ] PostgreSQL and Gunicorn are not publicly exposed.
-- [ ] UFW allows only SSH/80/443 inbound.
-- [ ] Gunicorn service is enabled and starts after reboot.
-- [ ] `collectstatic` succeeded and CSS loads.
-- [ ] Database migrations are applied.
-- [ ] `manage.py check --deploy` was reviewed.
-- [ ] `certbot renew --dry-run` passed.
-- [ ] Local and off-server backups exist.
-- [ ] A restore drill was performed on a separate database.
-- [ ] Health endpoint and uptime monitoring work.
-- [ ] Critical user flow was manually tested.
-
-## 26.2 Before each release
-
-- [ ] Tests pass locally/CI.
-- [ ] Migration status is understood.
-- [ ] Static/dependency changes are understood.
-- [ ] Commit is pushed to remote.
-- [ ] VPS Git working tree is clean.
-- [ ] Incoming changes were reviewed.
-- [ ] Database backup is current.
-- [ ] Service status and health endpoint are verified after deploy.
-- [ ] Release notes/tag are created from the correct commit.
-
-## 26.3 Before making the repository public
-
-- [ ] No secrets in current files or history.
-- [ ] Leaked secrets have been rotated.
-- [ ] `.gitignore` excludes environment files and keys.
-- [ ] `README.md` provides honest setup/run/test instructions.
-- [ ] `LICENSE` is selected deliberately.
-- [ ] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and `SECURITY.md` exist.
-- [ ] Issue/PR templates exist.
-- [ ] CI runs tests.
-- [ ] Dependency/security tooling is enabled where appropriate.
-- [ ] Production endpoints, IPs, usernames, tokens, and private infrastructure details are not published unnecessarily.
-
-# 27. Glossary
-
-| Term | Meaning |
-|---|---|
-| ACME | Protocol used by certificate authorities/clients such as Let’s Encrypt and Certbot |
-| Apache | Public web server used here for TLS, static files, logging, and reverse proxying |
-| ASGI | Python interface for asynchronous server/application communication |
-| Certificate | Signed proof that a domain’s server holds an associated private key |
-| CDN | Content delivery network, often used for caching/static delivery and edge routing |
-| CSRF | Cross-site request forgery protection mechanism for browser form/session security |
-| DNS | System mapping domain names to network addresses |
-| Gunicorn | Python WSGI application server |
-| HSTS | Browser policy telling clients to prefer HTTPS for a domain |
-| HTTPS | HTTP secured with TLS |
-| Journal | systemd’s log store, queried via `journalctl` |
-| Migration | Versioned Django operation changing database schema/data state |
-| PostgreSQL role | Database identity/permission set, distinct from Linux users and Django users |
-| Reverse proxy | Public server that forwards requests to an internal backend |
-| Static files | Rebuildable CSS/JS/images owned by the application source/build |
-| Media files | Persistent user uploads that need backup |
-| systemd | Linux service manager/supervisor |
-| TLS | Cryptographic transport layer used by HTTPS |
-| UFW | Ubuntu firewall management command-line tool |
-| Virtual host | Apache per-domain configuration block |
-| WSGI | Traditional Python web server/application interface |
-
-# 28. Official references
-
-1. **Django deployment overview and supported WSGI/ASGI paths** - Django documentation: https://docs.djangoproject.com/en/6.0/howto/deployment/
-2. **Django deployment checklist** - Django documentation: https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-3. **Apache reverse proxy documentation** - Apache HTTP Server: https://httpd.apache.org/docs/current/mod/mod_proxy.html
-4. **Apache virtual host examples** - Apache HTTP Server: https://httpd.apache.org/docs/2.4/vhosts/examples.html
-5. **Certbot user guide and renewal behavior** - Certbot documentation: https://eff-certbot.readthedocs.io/en/stable/using.html
-6. **Ubuntu UFW/firewall guide** - Ubuntu Server documentation: https://ubuntu.com/server/docs/how-to/security/firewalls/
-7. **PostgreSQL `pg_dump` and `pg_restore`** - PostgreSQL documentation: https://www.postgresql.org/docs/current/app-pgdump.html and https://www.postgresql.org/docs/current/app-pgrestore.html
-8. **GitHub community health files** - GitHub documentation: https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/about-community-profiles-for-public-repositories
-9. **GitHub Actions for Python** - GitHub documentation: https://docs.github.com/actions/guides/building-and-testing-python
-10. **GitHub security policy and secret safety** - GitHub documentation: https://docs.github.com/code-security/getting-started/adding-a-security-policy-to-your-repository and https://docs.github.com/en/code-security/concepts/secret-security/push-protection
-11. **Semantic Versioning** - https://semver.org/
+Keep technical documentation in Markdown next to the code. This makes setup instructions reviewable in pull requests and versioned alongside the code that they describe. GitBook Git Sync can publish that Markdown as a documentation site.
 
 ---
 
-## Final note
+<!-- Source: open-source/02-license-governance-security.md -->
 
-A good deployment is not the one with the most tools. It is the one whose responsibilities are understood, whose recovery path is tested, whose secrets and ports are controlled, and whose next operator can safely repeat the process.
+# 32. License, governance, contribution, and security policy
+
+## Choose a license intentionally
+
+A repository without a license is not a clear invitation for reuse. Common broad choices:
+
+| License | Practical meaning |
+|---|---|
+| MIT | short permissive license; reuse with notice/disclaimer |
+| Apache-2.0 | permissive with explicit patent terms |
+| GPL-3.0 | copyleft; derivative distribution generally remains GPL-compatible |
+| AGPL-3.0 | copyleft that also addresses network-service distribution |
+
+This is not legal advice. Choose based on your goals, dependencies, organization, and jurisdiction. Do not copy a license you do not intend to honor.
+
+## CONTRIBUTING.md
+
+Tell contributors:
+
+- supported setup path,
+- branch/PR workflow,
+- test commands,
+- coding/style expectations,
+- how to propose features and report bugs,
+- how to handle migrations/docs/changelog changes.
+
+## CODE_OF_CONDUCT.md
+
+For community-facing projects, a code of conduct gives a clear behavior standard and a reporting route. Use a recognized template appropriate to your community, then name a real contact path.
+
+## SECURITY.md
+
+A security policy should contain:
+
+- supported versions,
+- private reporting contact/path,
+- what information helps reproduce a vulnerability,
+- what response timeline is realistic,
+- a statement not to post exploitable details as public issues before coordination.
+
+## Governance is operational clarity
+
+Even a one-person project benefits from defined rules: who merges, how releases are cut, what branches are protected, what testing is required, and how breaking changes are communicated.
+
+## Issue and pull request templates
+
+Templates reduce incomplete reports. A useful bug report asks for:
+
+- project version or commit;
+- Django/Python/database versions;
+- deployment stack if relevant;
+- expected behavior;
+- actual behavior;
+- minimal reproduction;
+- logs or traceback with secrets removed.
+
+A useful pull request template asks for purpose, linked issue, test evidence, documentation updates, migration notes, and breaking-change impact. Keep templates short enough that contributors will actually complete them.
+
+## Roadmap and support policy
+
+A roadmap tells users what direction the project is taking. A support policy tells them what is maintained today. For documentation projects, state which Django versions, operating systems, and server stacks the guide actively tests or targets.
+
+## Documentation contribution guide
+
+Documentation has code-like quality rules. Ask contributors to keep commands copyable, explain placeholders, avoid real secrets/IPs, update both templates and explanatory chapters when needed, and cite official documentation for claims that change over time.
+
+---
+
+<!-- Source: open-source/03-releases-and-maintenance.md -->
+
+# 33. Releases, SemVer, changelogs, and support
+
+## Git commits, tags, and releases
+
+- A **commit** is a source snapshot in history.
+- A **branch** is a movable pointer to a line of work.
+- A **tag** is a named pointer to a specific commit, useful for immutable release snapshots.
+- A **release** is a human-facing publication around a tag: notes, downloads, known limitations, migration instructions.
+
+Do not retarget a release tag after users may have consumed it unless correcting a serious mistake and communicating clearly. Create the next version instead.
+
+## Semantic Versioning
+
+`MAJOR.MINOR.PATCH` communicates compatibility intent:
+
+```text
+1.4.2
+│ │ └─ compatible bug fix
+│ └─── backward-compatible feature
+└───── breaking change
+```
+
+Pre-release identifiers communicate instability/testing:
+
+```text
+0.2.0-beta.1
+0.2.0-beta.2
+0.2.0-rc.1
+0.2.0
+```
+
+Use a new beta number for meaningful fixes after the previous beta. Do not call a release final merely because it has a tag; call it final when its support/compatibility promise is real.
+
+## Changelog style
+
+A useful release note includes:
+
+```md
+## Fixed
+- Corrected timezone-aware public post URL generation.
+
+## Added
+- Added regression test for posts created near local midnight.
+
+## Changed
+- Documented production backup timer.
+
+## Upgrade notes
+- Run migrations: ...
+- Run collectstatic: ...
+```
+
+## Support boundaries
+
+State what is supported: Python/Django versions, database version, Linux target, deployment patterns, browser support, and security support window. Clear boundaries prevent users from assuming an untested configuration is guaranteed.
+
+## Release checklist
+
+Before publishing a release:
+
+- run link and Markdown checks if available;
+- verify examples against supported Django/Python versions where practical;
+- confirm templates match the chapters;
+- update changelog and upgrade notes;
+- tag the release;
+- publish human-readable release notes;
+- announce breaking changes clearly.
+
+For a GitBook, also verify that navigation renders correctly after Git sync and that renamed pages do not leave broken links.
+
+## Maintenance rhythm
+
+Production guidance ages. Review the book on a schedule for Django LTS changes, Ubuntu LTS changes, PostgreSQL support windows, TLS/certificate client changes, package names, and deployment-tool behavior. Mark unverified patterns as unverified rather than letting readers assume they are current.
+
+## Security maintenance
+
+Security fixes should have a private intake path, a clear maintainer owner, a release note that avoids unnecessary exploit detail, and a supported-version statement. If a vulnerable command or configuration appears in the book, fix the chapter, template, reference checklist, and any all-in-one appendix that repeats it.
+
+---
+
+<!-- Source: reference/01-reference-configurations.md -->
+
+# Reference configurations
+
+This page links to the templates in `templates/`. They are intentionally generic and use placeholders.
+
+| File | Use |
+|---|---|
+| [`templates/gunicorn.service`](../templates/gunicorn.service) | WSGI application systemd service |
+| [`templates/uvicorn.service`](../templates/uvicorn.service) | ASGI application systemd service |
+| [`templates/nginx-site.conf`](../templates/nginx-site.conf) | Nginx public proxy/static/TLS vhost shape |
+| [`templates/apache-gunicorn.conf`](../templates/apache-gunicorn.conf) | Apache reverse proxy vhost shape |
+| [`templates/apache-modwsgi.conf`](../templates/apache-modwsgi.conf) | Apache daemon-mode mod_wsgi vhost shape |
+| [`templates/Caddyfile`](../templates/Caddyfile) | Caddy reverse proxy/static pattern |
+| [`templates/django-production-settings.py`](../templates/django-production-settings.py) | production settings fragments |
+| [`templates/app.env.example`](../templates/app.env.example) | environment variable names only |
+| [`templates/db-backup.sh`](../templates/db-backup.sh) | database backup/verification pattern |
+| [`templates/db-backup.service`](../templates/db-backup.service) | backup service |
+| [`templates/db-backup.timer`](../templates/db-backup.timer) | nightly backup timer |
+| [`templates/ci.yml`](../templates/ci.yml) | GitHub Actions basic test job |
+| [`templates/docker-compose.yml`](../templates/docker-compose.yml) | conceptual Compose topology |
+
+Read the accompanying stack/operations chapter before using a template. Config files are not interchangeable: proxy headers, locations, socket paths, users, and TLS ownership must match the selected stack.
+
+## Learn the templates line by line
+
+Use [Template walkthroughs](../reference/06-template-walkthroughs.md) when a config file is correct but still feels mysterious. It explains the important lines in the environment file, Django settings, Gunicorn service, Nginx site, Docker Compose file, and backup timers.
+
+---
+
+<!-- Source: reference/02-checklists.md -->
+
+# Command checklists
+
+## First public launch
+
+```text
+[ ] DNS resolves to the right server.
+[ ] provider firewall allows only required ports.
+[ ] UFW allows SSH/80/443 and denies other inbound traffic.
+[ ] SSH key login works; root/password policy verified safely.
+[ ] app runs as non-root service account.
+[ ] PostgreSQL is private.
+[ ] secrets are outside Git and permission-restricted.
+[ ] DEBUG=False and ALLOWED_HOSTS are correct.
+[ ] static files collected and served.
+[ ] migrations applied.
+[ ] HTTPS certificate works; renewal dry-run passes.
+[ ] HTTP redirects to HTTPS.
+[ ] service starts after reboot.
+[ ] health endpoint and critical flow work.
+[ ] backup exists, is verified, and copied off-host.
+[ ] monitoring/error reporting is configured.
+```
+
+## Normal release
+
+```text
+[ ] local tests and Django checks pass.
+[ ] migration reviewed.
+[ ] Git working tree clean; commit/push complete.
+[ ] server Git state inspected before pull.
+[ ] code pulled with ff-only workflow.
+[ ] migrate only if required.
+[ ] collectstatic only if required.
+[ ] app service restarted.
+[ ] web-server config test/reload only if config changed.
+[ ] health check and changed critical workflow tested.
+[ ] logs monitored for new errors.
+```
+
+## Migration to another server
+
+```text
+[ ] target OS prepared; users/firewall/packages installed.
+[ ] code cloned at intended release tag.
+[ ] protected env file transferred securely.
+[ ] database created and restore tested.
+[ ] media copied/restored.
+[ ] app service and proxy configured.
+[ ] TLS certificate issued after DNS cutover or planned separately.
+[ ] health/critical flow tested before switch.
+[ ] DNS cutover completed and old server retained briefly for rollback.
+[ ] backups/monitoring recreated on target.
+```
+
+---
+
+<!-- Source: reference/03-troubleshooting.md -->
+
+# Troubleshooting map
+
+## Domain / connection
+
+```bash
+dig +short <DOMAIN>
+curl -I http://<DOMAIN>
+curl -Iv https://<DOMAIN>
+sudo ufw status numbered
+```
+
+## Nginx
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx
+sudo tail -n 100 /var/log/nginx/error.log
+```
+
+## Apache
+
+```bash
+sudo apache2ctl configtest
+sudo systemctl status apache2
+sudo tail -n 100 /var/log/apache2/error.log
+```
+
+## Application service
+
+```bash
+sudo systemctl status <APP_NAME>
+sudo journalctl -u <APP_NAME> -n 100 --no-pager
+sudo journalctl -u <APP_NAME> -f
+curl -I http://127.0.0.1:8000/
+```
+
+## Django configuration
+
+```bash
+sudo -u <APP_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+/srv/<APP_NAME>/venv/bin/python manage.py check --deploy
+'
+```
+
+## PostgreSQL
+
+```bash
+sudo systemctl status postgresql
+sudo -u postgres psql -d <DB_NAME> -c "SELECT 1;"
+```
+
+## Certificate renewal
+
+```bash
+sudo certbot certificates
+sudo certbot renew --dry-run
+```
+
+## Git deployment state
+
+```bash
+sudo -u <DEPLOY_USER> -H bash -lc '
+cd /srv/<APP_NAME>/app
+git status --short --branch
+git log -1 --oneline
+git remote -v
+'
+```
+
+## Interpret before changing
+
+| Result | Meaning | Next step |
+|---|---|---|
+| Proxy config invalid | web server cannot safely reload | fix config syntax/path before restart |
+| App service inactive | upstream unavailable | read app journal, do not only restart repeatedly |
+| localhost app works but public domain fails | proxy/DNS/firewall/TLS issue | inspect web-server access/error logs |
+| app returns 500 | Django/config/database issue | read traceback from app journal |
+| app returns 404 for one record | URL/data/filter mismatch | inspect generated URL, stored fields, query filters |
+| static 404 | collection/alias/permissions mismatch | run collectstatic, verify directory and alias |
+
+---
+
+<!-- Source: reference/04-glossary.md -->
+
+# Glossary
+
+| Term | Meaning |
+|---|---|
+| ACME | protocol used by certificate authorities/clients such as Let's Encrypt/Certbot |
+| ALLOWED_HOSTS | Django protection against unexpected Host headers |
+| ASGI | asynchronous Python web-server gateway interface |
+| CDN | geographically distributed proxy/cache layer for public assets or traffic |
+| CNAME | DNS record that aliases one hostname to another hostname |
+| connection pool | shared set of database connections reused by application processes |
+| CSRF | protection against malicious cross-site form submissions |
+| daemon | long-running background process/service |
+| DNS | system mapping names to IP addresses |
+| Gunicorn | Python WSGI application server |
+| HSTS | browser policy remembering to use HTTPS |
+| HTTP | web request/response protocol |
+| HTTPS | HTTP over TLS encryption |
+| idempotent task | task that can be retried without causing duplicate harmful effects |
+| load balancer | component that distributes traffic across healthy app instances |
+| localhost | network name for the same machine, commonly `127.0.0.1` or `::1` |
+| migration | versioned Django database schema/data operation |
+| mod_wsgi | Apache module hosting Python WSGI apps |
+| NAT | network address translation between private and public networks |
+| object storage | S3-compatible or cloud storage for files/media outside the app server disk |
+| PgBouncer | lightweight PostgreSQL connection pooler |
+| private IP | address reachable only inside a private network |
+| public IP | address routable from the public internet |
+| reverse proxy | public server forwarding requests to private upstream app service |
+| socket | endpoint for process communication; can be TCP or Unix file socket |
+| systemd | Linux service manager |
+| TCP | transport protocol used by HTTP(S), SSH, PostgreSQL, Redis, and many APIs |
+| TLS | cryptographic protocol behind HTTPS |
+| TTL | DNS cache lifetime value used by resolvers |
+| UFW | Ubuntu firewall management frontend |
+| Unix socket | same-machine process communication endpoint represented as a file |
+| VPS | virtual private server rented from a hosting provider |
+| WSGI | traditional synchronous Python web-server gateway interface |
+| zero-downtime deployment | deployment approach that keeps serving successful requests during release |
+
+---
+
+<!-- Source: reference/05-official-sources.md -->
+
+# Official sources and continued learning
+
+Use current official documentation when applying a real deployment. Versions and package behavior change.
+
+- [Django deployment documentation](https://docs.djangoproject.com/en/6.0/howto/deployment/)
+- [Django deployment checklist](https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/)
+- [Django security documentation](https://docs.djangoproject.com/en/6.0/topics/security/)
+- [Django with Apache and mod_wsgi](https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/modwsgi/)
+- [Django with uWSGI](https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/uwsgi/)
+- [Gunicorn deployment documentation](https://gunicorn.org/deploy/)
+- [Nginx documentation](https://nginx.org/en/docs/)
+- [Nginx proxy module](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)
+- [Apache HTTP Server documentation](https://httpd.apache.org/docs/2.4/)
+- [Caddy reverse proxy quick-start](https://caddyserver.com/docs/quick-starts/reverse-proxy)
+- [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)
+- [Ubuntu firewall documentation](https://documentation.ubuntu.com/security/security-features/network/firewall/)
+- [PostgreSQL documentation](https://www.postgresql.org/docs/)
+- [Certbot documentation](https://eff-certbot.readthedocs.io/)
+- [GitBook Git Sync](https://www.gitbook.com/features/git-sync)
+- [GitHub Actions documentation](https://docs.github.com/actions)
+- [Semantic Versioning](https://semver.org/)
+
+Read your installed software’s documentation and release notes before applying version-specific commands in production.
+
+---
+
+<!-- Source: reference/06-template-walkthroughs.md -->
+
+# Template walkthroughs: explain every important line
+
+The `templates/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
+
+## `templates/app.env.example`
+
+```dotenv
+DJANGO_SECRET_KEY='replace-with-a-long-random-secret'
+```
+
+This is the cryptographic secret Django uses for signing data such as sessions and password-reset tokens. In production it must be unique, long, unpredictable, and private. If it leaks, rotate it.
+
+```dotenv
+DJANGO_DEBUG=False
+```
+
+This disables development debug behavior. Production debug pages can expose settings, paths, SQL, environment details, and stack traces.
+
+```dotenv
+DJANGO_ALLOWED_HOSTS=<DOMAIN>,<WWW_DOMAIN>
+```
+
+This is the comma-separated list of hostnames Django is allowed to serve. It should match the domains users type into the browser.
+
+```dotenv
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<DOMAIN>,https://<WWW_DOMAIN>
+```
+
+This is used for CSRF protection on HTTPS forms and unsafe requests. Include the scheme (`https://`) because Django expects origins, not just hostnames.
+
+```dotenv
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+```
+
+These say Django should connect to PostgreSQL on the same server using PostgreSQL's default TCP port. If you move PostgreSQL to a private managed database, these values change.
+
+## `templates/django-production-settings.py`
+
+This file demonstrates a production settings shape. The most important idea is that code contains names of required settings, while the server supplies values.
+
+```python
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+```
+
+The app refuses to start if the secret is missing. That is safer than silently generating a different key on every restart.
+
+```python
+DEBUG = env_bool("DJANGO_DEBUG", False)
+```
+
+This reads a string from the environment and converts it to a boolean. Never write `DEBUG = os.environ.get("DJANGO_DEBUG")` because the string `"False"` would still behave like true in many Python checks.
+
+```python
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+```
+
+This converts `example.com,www.example.com` into `['example.com', 'www.example.com']`.
+
+```python
+"ENGINE": "django.db.backends.postgresql"
+```
+
+This tells Django to use PostgreSQL, not SQLite. The database driver must be installed in your Python environment.
+
+```python
+"CONN_MAX_AGE": 60
+```
+
+This allows Django to reuse database connections for up to 60 seconds. It can improve performance, but too many workers can still create too many database connections.
+
+```python
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+```
+
+Use this only when the reverse proxy is trusted and Gunicorn/Uvicorn is private. It tells Django that requests with `X-Forwarded-Proto: https` were HTTPS at the public edge.
+
+## `templates/gunicorn.service`
+
+```ini
+[Unit]
+Description=<APP_NAME> Django application via Gunicorn
+After=network.target postgresql.service
+Wants=postgresql.service
+```
+
+`[Unit]` describes the service and its startup relationship. `After` means systemd should start this after the network and PostgreSQL service. `Wants` asks systemd to start PostgreSQL too, but it is not as strict as `Requires`.
+
+```ini
+[Service]
+Type=simple
+```
+
+`Type=simple` means the process started by `ExecStart` is the service process. This fits Gunicorn when it stays in the foreground.
+
+```ini
+User=<APP_USER>
+Group=<APP_USER>
+```
+
+Gunicorn runs as a limited application user. If someone exploits the Python process, they get that user's permissions, not root permissions.
+
+```ini
+WorkingDirectory=/srv/<APP_NAME>/app
+```
+
+This makes relative paths resolve from the application repository directory.
+
+```ini
+EnvironmentFile=/etc/<APP_NAME>/<APP_NAME>.env
+```
+
+Systemd loads deployment-specific variables before starting Gunicorn.
+
+```ini
+ExecStart=/srv/<APP_NAME>/venv/bin/gunicorn \
+  --workers 3 \
+  --bind 127.0.0.1:8000 \
+  --access-logfile - \
+  --error-logfile - \
+  <PROJECT_PACKAGE>.wsgi:application
+```
+
+This starts Gunicorn from the virtual environment, creates three workers, listens only on the local server, sends logs to the journal, and imports Django's WSGI application.
+
+```ini
+Restart=on-failure
+RestartSec=5
+```
+
+If Gunicorn crashes, systemd waits five seconds and starts it again. This helps with unexpected crashes but does not fix a permanent configuration error.
+
+## `templates/nginx-site.conf`
+
+```nginx
+server_name <DOMAIN> <WWW_DOMAIN>;
+```
+
+This must match the hostnames in DNS and Django `ALLOWED_HOSTS`.
+
+```nginx
+location /static/ {
+    alias /srv/<APP_NAME>/staticfiles/;
+}
+```
+
+Nginx serves collected static files directly. Django should not spend Python worker time serving CSS, JavaScript, and images in production.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+```
+
+Everything else goes to Gunicorn. This is the reverse-proxy handoff.
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+These headers preserve public request information so Django can make correct security and URL decisions.
+
+## `templates/docker-compose.yml`
+
+```yaml
+services:
+```
+
+A Compose file defines named containers that work together.
+
+```yaml
+web:
+  build: .
+  command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+```
+
+The `web` service builds your app image and runs Gunicorn inside the container. Inside a container, binding to `0.0.0.0` is normal because Docker controls how the container port is exposed.
+
+```yaml
+db:
+  image: postgres:16
+```
+
+The `db` service runs PostgreSQL. Pin a major version deliberately; changing database major versions is an upgrade project, not a casual edit.
+
+```yaml
+volumes:
+  postgres_data:
+```
+
+The database needs persistent storage. Without a volume, deleting the container can delete the database data.
+
+## `templates/db-backup.service` and `.timer`
+
+A systemd service describes what one backup run does. A systemd timer describes when that service runs.
+
+```ini
+Type=oneshot
+```
+
+The backup command runs, finishes, and exits. It is not a long-running daemon.
+
+```ini
+UMask=0077
+```
+
+New backup files should be private by default. Database dumps can contain user data, password hashes, private content, and business data.
+
+```ini
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+```
+
+This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
+
+## How to adapt a template safely
+
+Use this checklist every time you copy a template:
+
+```text
+[ ] Replace every placeholder: <APP_NAME>, <DOMAIN>, <PROJECT_PACKAGE>, users, database names.
+[ ] Confirm file paths exist on the server.
+[ ] Confirm ownership and permissions match the service user.
+[ ] Test syntax: nginx -t, apache2ctl configtest, systemd daemon-reload.
+[ ] Start or reload the service.
+[ ] Read logs immediately after startup.
+[ ] Test the public URL and health check.
+```
+
+If you cannot explain a line, leave a note and look it up before production use. Unknown config is operational debt.
+
+---

@@ -73,3 +73,50 @@ There is no absolute finish line called “secure.” For a small public Django 
 - Django production checks are clean or consciously reviewed,
 - backups are automated, verified, and copied off the host,
 - logs and an incident runbook exist.
+
+## How to read commands in this book
+
+A terminal command is not magic. It is a request to change or inspect one layer of the system. Before running a command, identify four things:
+
+| Question | Example |
+|---|---|
+| Who runs it? | root through `sudo`, the deploy user, the app user, or `postgres` |
+| Where is it run? | your laptop, the VPS shell, inside a container, or inside PostgreSQL |
+| What does it change? | files, packages, services, database schema, firewall rules, or only output |
+| How do you verify it? | `systemctl status`, `nginx -t`, `curl`, `journalctl`, `psql`, or a browser |
+
+For example:
+
+```bash
+sudo systemctl restart <APP_NAME>
+```
+
+This is a server command. `sudo` means it asks for administrator privileges. `systemctl` talks to systemd. `restart` stops and starts the service. `<APP_NAME>` is a placeholder for the service unit name. The command does not deploy code by itself; it only tells the already-installed service to start again using the files and environment currently on disk.
+
+A safe follow-up is:
+
+```bash
+sudo systemctl status <APP_NAME>
+sudo journalctl -u <APP_NAME> -n 50 --no-pager
+```
+
+The first command asks whether systemd thinks the service is running. The second shows recent logs. If the restart failed, the logs usually explain whether the cause was Python import failure, missing environment variable, database connection error, bad permissions, or a crashed worker.
+
+## Placeholders are not optional thinking
+
+Angle-bracket values such as `<APP_NAME>`, `<DOMAIN>`, `<APP_USER>`, and `<DB_NAME>` are placeholders. Replace them consistently with your real values. Do not leave angle brackets in real config files unless the tool explicitly expects them.
+
+A good private deployment note might say:
+
+```text
+APP_NAME=exampleapp
+PROJECT_PACKAGE=config
+DOMAIN=example.com
+WWW_DOMAIN=www.example.com
+DEPLOY_USER=deploy
+APP_USER=exampleapp
+DB_NAME=exampleapp_prod
+DB_USER=exampleapp_user
+```
+
+When a later command says `/srv/<APP_NAME>/venv/bin/python`, you should mentally translate it to `/srv/exampleapp/venv/bin/python`. This habit prevents many copy/paste mistakes.

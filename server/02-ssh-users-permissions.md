@@ -93,3 +93,79 @@ sudo chmod -R g+rX /srv/<APP_NAME>/app
 ```
 
 Adapt this rule if your deployment user needs to keep exclusive ownership; the principle is that application code should be readable by the runtime user, while Git operations remain controlled.
+
+## What the first package commands do
+
+```bash
+sudo apt update
+```
+
+This downloads the latest package index from Ubuntu repositories. It does not upgrade software by itself; it refreshes the server's knowledge of available versions.
+
+```bash
+sudo apt upgrade
+```
+
+This applies available upgrades. On a new server, run it early so you are not building on stale packages.
+
+```bash
+sudo apt install -y git curl ca-certificates build-essential python3 python3-venv python3-pip
+```
+
+This installs the basic tools the deployment needs:
+
+| Package | Why it is installed |
+|---|---|
+| `git` | downloads and updates your source code |
+| `curl` | tests HTTP endpoints from the terminal |
+| `ca-certificates` | lets tools trust public HTTPS certificates |
+| `build-essential` | compiles Python packages that need native extensions |
+| `python3` | runs Python |
+| `python3-venv` | creates an isolated virtual environment |
+| `python3-pip` | installs Python packages |
+
+The `-y` flag answers yes to the install prompt. Use it only when you understand the package list.
+
+## Why there are two Linux users
+
+A common beginner mistake is to run everything as `root` because it avoids permission errors. That works until a bug, stolen key, or bad command has unlimited power.
+
+This guide separates identities:
+
+| Identity | Job | Should it log in by SSH? |
+|---|---|---|
+| `<DEPLOY_USER>` | human deploys code and runs admin commands with sudo | yes |
+| `<APP_USER>` | systemd runs Django/Gunicorn with limited permissions | no |
+| `www-data` | Nginx/Apache reads public files | no |
+| `postgres` | PostgreSQL administration role on the OS | no normal app login |
+
+The app user should be able to read code and write only what the app truly needs, such as local media if you use local media storage. It should not own your whole server.
+
+## Understanding the `install -d` directory commands
+
+```bash
+sudo install -d -o <DEPLOY_USER> -g <APP_USER> -m 750 /srv/<APP_NAME>/app
+```
+
+Read it piece by piece:
+
+| Piece | Meaning |
+|---|---|
+| `sudo` | run with administrator privileges |
+| `install -d` | create a directory with exact ownership and permissions |
+| `-o <DEPLOY_USER>` | make the deploy user the owner |
+| `-g <APP_USER>` | make the app user group the group owner |
+| `-m 750` | owner can read/write/enter; group can read/enter; others get no access |
+| `/srv/<APP_NAME>/app` | the target directory for the application repository |
+
+This is more precise than `mkdir` followed by several `chown` and `chmod` commands.
+
+## Why `g+rX` is used for code
+
+```bash
+sudo chmod -R g+rX /srv/<APP_NAME>/app
+```
+
+`g+rX` means "give the group read permission, and give execute permission only to directories and already-executable files." Directories need execute permission so a process can enter them. Normal Python files need read permission, not execute permission.
+
+This lets `<APP_USER>` import Python code without making every file executable.
