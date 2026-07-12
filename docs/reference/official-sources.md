@@ -16,7 +16,8 @@ Use current official documentation when applying a real deployment. Versions and
 - [Ubuntu firewall documentation](https://documentation.ubuntu.com/security/security-features/network/firewall/)
 - [PostgreSQL documentation](https://www.postgresql.org/docs/)
 - [Certbot documentation](https://eff-certbot.readthedocs.io/)
-- [GitBook Git Sync](https://www.gitbook.com/features/git-sync)
+- [Read the Docs: MkDocs projects](https://docs.readthedocs.com/platform/stable/intro/mkdocs.html)
+- [MkDocs documentation](https://www.mkdocs.org/)
 - [GitHub Actions documentation](https://docs.github.com/actions)
 - [Semantic Versioning](https://semver.org/)
 

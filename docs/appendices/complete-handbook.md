@@ -1,16 +1,14 @@
 # Complete all-in-one handbook
 
-This appendix is generated from the current chaptered GitBook pages. The chaptered pages remain the preferred navigation; this file is for offline reading, search, printing, and one-page review.
-
-> If a chapter and this appendix ever disagree, update the chapter first and regenerate this appendix from `SUMMARY.md`.
+This appendix combines the current chapter pages. The chaptered pages remain the source of truth; this file is for offline reading, search, printing, and one-page review. > If a chapter and this appendix ever disagree, update the chapter first and regenerate this appendix from the navigation in `mkdocs.yml`.
 
 ---
 
-<!-- Source: README.md -->
+<!-- Source: docs/index.md -->
 
 # Django Production Deployment Guide
 
-> A GitBook-ready, docs-as-code handbook for moving a bare Django project from a developer laptop to a secure, repeatable production service.
+> A Read the Docs-ready, docs-as-code handbook for moving a bare Django project from a developer laptop to a secure, repeatable production service.
 
 This guide is deliberately **explanatory**. It teaches what each layer is, why it exists, when to choose it, how the pieces communicate, how to configure them, and how to operate the system after launch.
 
@@ -54,14 +52,14 @@ Choose **Nginx + Gunicorn** when you want the common reverse-proxy path. Choose 
 
 ## Start here
 
-1. Read [Mental model](../foundations/01-mental-model.md).
-2. Read [Choose your architecture](../foundations/03-choose-your-stack.md).
-3. Follow the [reference deployment path](../stacks/02-nginx-gunicorn-postgres.md) for a first VPS deployment.
-4. Do not skip [security](../operations/02-firewall-ssh-and-host-security.md), [backups](../operations/05-backups-and-disaster-recovery.md), or [open-source publication](../open-source/01-publishing-a-project.md).
+1. Read [Mental model](../getting-started/production-mental-model.md).
+2. Read [Choose your architecture](../getting-started/choose-a-stack.md).
+3. Follow the [reference deployment path](../deployment-stacks/nginx-gunicorn-postgresql.md) for a first VPS deployment.
+4. Do not skip [security](../operations/firewall-ssh-and-host-security.md), [backups](../operations/backups-and-disaster-recovery.md), or [open-source publication](../open-source/publishing-a-project.md).
 
-## How to use this as GitBook
+## Read and publish the book
 
-This repository contains `README.md` and `SUMMARY.md` navigation plus plain Markdown pages. Push it to GitHub/GitLab, then connect the repository to a GitBook Space using Git Sync/import. See [GitBook setup](../GITBOOK_SETUP.md).
+Use the chapter navigation to read online. Maintainers can follow [Publishing on Read the Docs](../read-the-docs-setup.md) to configure a hosted build.
 
 ## Safety rule
 
@@ -69,7 +67,7 @@ Every command is a template. Replace placeholders such as `<APP_NAME>`, `<DOMAIN
 
 ---
 
-<!-- Source: foundations/01-mental-model.md -->
+<!-- Source: getting-started/production-mental-model.md -->
 
 # 1. The production mental model
 
@@ -196,7 +194,7 @@ When a later command says `/srv/<APP_NAME>/venv/bin/python`, you should mentally
 
 ---
 
-<!-- Source: foundations/02-request-journey.md -->
+<!-- Source: getting-started/request-journey.md -->
 
 # 2. The request journey
 
@@ -230,7 +228,7 @@ It may look simpler to expose Django directly. Production layers exist because t
 | DNS | Human name to network address |
 | Reverse proxy | TLS, redirects, static files, client connection handling, access logs |
 | App server | Python worker lifecycle and WSGI/ASGI protocol |
-| Django | application rules, forms, ORM, authorization, templates/API |
+| Django | application rules, forms, ORM, authorization, config-examples/API |
 | PostgreSQL | durable transactions, indexes, concurrent data access |
 | systemd | start on boot, restart after failure, service logs |
 
@@ -254,7 +252,7 @@ Do not jump to application code when the network layer is failing, and do not op
 
 ---
 
-<!-- Source: foundations/03-choose-your-stack.md -->
+<!-- Source: getting-started/choose-a-stack.md -->
 
 # 3. Choose your stack deliberately
 
@@ -355,7 +353,7 @@ Avoid these without a specific reason:
 
 ---
 
-<!-- Source: foundations/04-variables-and-layout.md -->
+<!-- Source: getting-started/variables-and-layout.md -->
 
 # 4. Variables and target layout
 
@@ -408,7 +406,7 @@ Use the same app prefix in service names, directories, database names, backup pa
 
 ---
 
-<!-- Source: application/01-repository-and-dependencies.md -->
+<!-- Source: django-application/repository-and-dependencies.md -->
 
 # 5. Repository hygiene and dependencies
 
@@ -426,9 +424,9 @@ myproject/
 │   ├── wsgi.py
 │   └── asgi.py
 ├── web/
-├── templates/
+├── config-examples/
 ├── static/
-├── deploy/                 # public templates/scripts only
+├── deploy/                 # public config-examples/scripts only
 ├── docs/
 ├── README.md
 ├── LICENSE
@@ -524,7 +522,7 @@ A migration is code that changes data structure. Treat it as part of the release
 
 ---
 
-<!-- Source: application/02-production-settings-and-secrets.md -->
+<!-- Source: django-application/production-settings-and-secrets.md -->
 
 # 6. Production settings and secrets
 
@@ -757,7 +755,7 @@ If a secret leaks, rotate the secret. Do not only delete it from the latest comm
 
 ---
 
-<!-- Source: application/03-static-media-migrations-health.md -->
+<!-- Source: django-application/static-media-migrations-health-checks.md -->
 
 # 7. Static files, media, migrations, and health checks
 
@@ -829,7 +827,7 @@ Then exercise one critical authenticated path manually or with browser automatio
 
 ---
 
-<!-- Source: application/04-wsgi-and-asgi.md -->
+<!-- Source: django-application/wsgi-and-asgi.md -->
 
 # 8. WSGI and ASGI explained
 
@@ -889,7 +887,7 @@ Start with WSGI/Gunicorn for a conventional Django site. Adopt ASGI because a fe
 
 ---
 
-<!-- Source: application/05-email-background-work.md -->
+<!-- Source: django-application/email-background-tasks-and-services.md -->
 
 # 9. Email, background work, cache, and external services
 
@@ -991,7 +989,7 @@ Document each scheduled task with:
 
 ---
 
-<!-- Source: server/01-vps-dns-provider.md -->
+<!-- Source: server-setup/vps-dns-and-provider-controls.md -->
 
 # 10. VPS, Ubuntu, DNS, and provider controls
 
@@ -1143,7 +1141,7 @@ This documentation matters during incidents. If the original deployer is unavail
 
 ---
 
-<!-- Source: server/02-ssh-users-permissions.md -->
+<!-- Source: server-setup/ssh-users-and-permissions.md -->
 
 # 11. SSH, users, permissions, and directories
 
@@ -1319,7 +1317,7 @@ This lets `<APP_USER>` import Python code without making every file executable.
 
 ---
 
-<!-- Source: server/03-postgresql.md -->
+<!-- Source: server-setup/postgresql.md -->
 
 # 12. PostgreSQL: the private data layer
 
@@ -1455,7 +1453,7 @@ cd /srv/<APP_NAME>/app
 
 ---
 
-<!-- Source: server/04-systemd-and-environment.md -->
+<!-- Source: server-setup/systemd-and-environment.md -->
 
 # 13. systemd and environment files
 
@@ -1571,7 +1569,7 @@ The log is evidence. Preserve it while you debug.
 
 ---
 
-<!-- Source: stacks/01-gunicorn.md -->
+<!-- Source: deployment-stacks/gunicorn.md -->
 
 # 14. Gunicorn: the WSGI application server
 
@@ -1717,7 +1715,7 @@ That difference is intentional. Production values repeatability and control over
 
 ---
 
-<!-- Source: stacks/02-nginx-gunicorn-postgres.md -->
+<!-- Source: deployment-stacks/nginx-gunicorn-postgresql.md -->
 
 # 15. Nginx + Gunicorn + PostgreSQL
 
@@ -1942,7 +1940,7 @@ If the admin has no CSS, check `collectstatic`, `STATIC_ROOT`, the Nginx `alias`
 
 ---
 
-<!-- Source: stacks/03-apache-gunicorn-postgres.md -->
+<!-- Source: deployment-stacks/apache-gunicorn-postgresql.md -->
 
 # 16. Apache + Gunicorn + PostgreSQL
 
@@ -2150,7 +2148,7 @@ If Apache says a directive is invalid, the module that provides that directive m
 
 ---
 
-<!-- Source: stacks/04-apache-modwsgi.md -->
+<!-- Source: deployment-stacks/apache-mod-wsgi.md -->
 
 # 17. Apache + mod_wsgi
 
@@ -2326,7 +2324,7 @@ It is a valid production stack, but it is less forgiving for beginners than Apac
 
 ---
 
-<!-- Source: stacks/05-caddy-gunicorn.md -->
+<!-- Source: deployment-stacks/caddy-gunicorn.md -->
 
 # 18. Caddy + Gunicorn
 
@@ -2497,7 +2495,7 @@ and the browser requests:
 
 ---
 
-<!-- Source: stacks/06-asgi-websockets.md -->
+<!-- Source: deployment-stacks/asgi-and-websockets.md -->
 
 # 19. ASGI: Uvicorn, Daphne, Hypercorn, and WebSockets
 
@@ -2659,7 +2657,7 @@ Redis should be private. If Redis is only used as a channel layer/cache, its bac
 
 ---
 
-<!-- Source: stacks/07-docker-compose.md -->
+<!-- Source: deployment-stacks/docker-compose.md -->
 
 # 20. Docker Compose
 
@@ -2854,7 +2852,7 @@ Compose can be clean and practical, but it does not answer those questions for y
 
 ---
 
-<!-- Source: stacks/08-managed-and-kubernetes.md -->
+<!-- Source: deployment-stacks/managed-platforms-and-kubernetes.md -->
 
 # 21. PaaS, managed hosting, serverless, and Kubernetes
 
@@ -2992,7 +2990,7 @@ Kubernetes is powerful, but it moves complexity from one server into a platform.
 
 ---
 
-<!-- Source: stacks/09-uwsgi-nginx.md -->
+<!-- Source: deployment-stacks/uwsgi-nginx.md -->
 
 # 22. uWSGI + Nginx
 
@@ -3160,7 +3158,7 @@ If you already know Gunicorn, choose uWSGI only for a specific operational reaso
 
 ---
 
-<!-- Source: stacks/10-other-valid-options.md -->
+<!-- Source: deployment-stacks/other-options.md -->
 
 # 23. Other valid options and where they fit
 
@@ -3168,7 +3166,7 @@ The main stacks in this book cover the usual first choices. These tools are also
 
 ## Nginx Unit
 
-Nginx Unit is an application server from the Nginx ecosystem that can run application processes with dynamic configuration. It can fit teams already using Unit, but it is a different product from Nginx itself. Learn its application/process model before choosing it as a “simpler Nginx.”
+Nginx Unit is an application server from the Nginx ecosystem that can run application processes with dynamic configuration. It can fit teams already using Unit, but it is a different product from Nginx itself. Learn its django-application/process model before choosing it as a “simpler Nginx.”
 
 ## Waitress
 
@@ -3275,7 +3273,7 @@ If you cannot answer those questions, the stack is not ready for production yet.
 
 ---
 
-<!-- Source: operations/01-tls-https.md -->
+<!-- Source: operations/tls-and-https.md -->
 
 # 24. TLS, HTTPS, redirects, and HSTS
 
@@ -3373,7 +3371,7 @@ The important rule is not "close port 80." The important rule is "do not serve s
 
 ---
 
-<!-- Source: operations/02-firewall-ssh-and-host-security.md -->
+<!-- Source: operations/firewall-ssh-and-host-security.md -->
 
 # 25. Firewall, SSH, Fail2Ban, and host security
 
@@ -3505,7 +3503,7 @@ Fail2Ban should reduce noisy brute-force attempts, but it is not your primary se
 
 ---
 
-<!-- Source: operations/03-deployment-runbooks.md -->
+<!-- Source: operations/deployment-runbooks.md -->
 
 # 26. Safe deployments, migrations, and rollbacks
 
@@ -3686,7 +3684,7 @@ If migrations changed the database in a non-compatible way, code rollback may no
 
 ---
 
-<!-- Source: operations/04-observability-and-incidents.md -->
+<!-- Source: operations/observability-and-incidents.md -->
 
 # 27. Logging, monitoring, and incident response
 
@@ -3810,7 +3808,7 @@ The point is not blame. The point is to make the next failure smaller, faster to
 
 ---
 
-<!-- Source: operations/05-backups-and-disaster-recovery.md -->
+<!-- Source: operations/backups-and-disaster-recovery.md -->
 
 # 28. Backups, restore drills, and disaster recovery
 
@@ -3949,7 +3947,7 @@ These are business decisions, not only technical settings. A hobby blog and a pa
 
 ---
 
-<!-- Source: operations/06-testing-ci-staging.md -->
+<!-- Source: operations/testing-ci-and-staging.md -->
 
 # 29. Testing, CI, staging, and smoke tests
 
@@ -4089,7 +4087,7 @@ CI answers "does this revision pass automated checks?" Deployment answers "is th
 
 ---
 
-<!-- Source: operations/07-scaling.md -->
+<!-- Source: operations/scaling.md -->
 
 # 30. Scaling without premature complexity
 
@@ -4192,7 +4190,7 @@ Managed databases, Redis, object storage, CDN, and email providers are often che
 
 ---
 
-<!-- Source: open-source/01-publishing-a-project.md -->
+<!-- Source: open-source/publishing-a-project.md -->
 
 # 31. Publishing an open-source project
 
@@ -4255,11 +4253,11 @@ POSTGRES_PORT=5432
 
 ## Documentation-as-code
 
-Keep technical documentation in Markdown next to the code. This makes setup instructions reviewable in pull requests and versioned alongside the code that they describe. GitBook Git Sync can publish that Markdown as a documentation site.
+Keep technical documentation in Markdown next to the code. This makes setup instructions reviewable in pull requests and versioned alongside the code that they describe. Read the Docs can build and publish that Markdown as a versioned documentation site.
 
 ---
 
-<!-- Source: open-source/02-license-governance-security.md -->
+<!-- Source: open-source/license-governance-and-security.md -->
 
 # 32. License, governance, contribution, and security policy
 
@@ -4329,7 +4327,7 @@ Documentation has code-like quality rules. Ask contributors to keep commands cop
 
 ---
 
-<!-- Source: open-source/03-releases-and-maintenance.md -->
+<!-- Source: open-source/releases-and-maintenance.md -->
 
 # 33. Releases, SemVer, changelogs, and support
 
@@ -4399,7 +4397,7 @@ Before publishing a release:
 - publish human-readable release notes;
 - announce breaking changes clearly.
 
-For a GitBook, also verify that navigation renders correctly after Git sync and that renamed pages do not leave broken links.
+For Read the Docs, run `mkdocs build --strict` and verify that navigation renders correctly and renamed pages do not leave broken links.
 
 ## Maintenance rhythm
 
@@ -4411,37 +4409,37 @@ Security fixes should have a private intake path, a clear maintainer owner, a re
 
 ---
 
-<!-- Source: reference/01-reference-configurations.md -->
+<!-- Source: reference/configuration-examples.md -->
 
-# Reference configurations
+# Configuration examples
 
-This page links to the templates in `templates/`. They are intentionally generic and use placeholders.
+This page links to the templates in `config-examples/`. They are intentionally generic and use placeholders.
 
 | File | Use |
 |---|---|
-| [`templates/gunicorn.service`](../templates/gunicorn.service) | WSGI application systemd service |
-| [`templates/uvicorn.service`](../templates/uvicorn.service) | ASGI application systemd service |
-| [`templates/nginx-site.conf`](../templates/nginx-site.conf) | Nginx public proxy/static/TLS vhost shape |
-| [`templates/apache-gunicorn.conf`](../templates/apache-gunicorn.conf) | Apache reverse proxy vhost shape |
-| [`templates/apache-modwsgi.conf`](../templates/apache-modwsgi.conf) | Apache daemon-mode mod_wsgi vhost shape |
-| [`templates/Caddyfile`](../templates/Caddyfile) | Caddy reverse proxy/static pattern |
-| [`templates/django-production-settings.py`](../templates/django-production-settings.py) | production settings fragments |
-| [`templates/app.env.example`](../templates/app.env.example) | environment variable names only |
-| [`templates/db-backup.sh`](../templates/db-backup.sh) | database backup/verification pattern |
-| [`templates/db-backup.service`](../templates/db-backup.service) | backup service |
-| [`templates/db-backup.timer`](../templates/db-backup.timer) | nightly backup timer |
-| [`templates/ci.yml`](../templates/ci.yml) | GitHub Actions basic test job |
-| [`templates/docker-compose.yml`](../templates/docker-compose.yml) | conceptual Compose topology |
+| [`config-examples/gunicorn.service`](../config-examples/gunicorn.service) | WSGI application systemd service |
+| [`config-examples/uvicorn.service`](../config-examples/uvicorn.service) | ASGI application systemd service |
+| [`config-examples/nginx-site.conf`](../config-examples/nginx-site.conf) | Nginx public proxy/static/TLS vhost shape |
+| [`config-examples/apache-gunicorn.conf`](../config-examples/apache-gunicorn.conf) | Apache reverse proxy vhost shape |
+| [`config-examples/apache-modwsgi.conf`](../config-examples/apache-modwsgi.conf) | Apache daemon-mode mod_wsgi vhost shape |
+| [`config-examples/Caddyfile`](../config-examples/Caddyfile) | Caddy reverse proxy/static pattern |
+| [`config-examples/django-production-settings.py`](../config-examples/django-production-settings.py) | production settings fragments |
+| [`config-examples/app.env.example`](../config-examples/app.env.example) | environment variable names only |
+| [`config-examples/db-backup.sh`](../config-examples/db-backup.sh) | database backup/verification pattern |
+| [`config-examples/db-backup.service`](../config-examples/db-backup.service) | backup service |
+| [`config-examples/db-backup.timer`](../config-examples/db-backup.timer) | nightly backup timer |
+| [`config-examples/ci.yml`](../config-examples/ci.yml) | GitHub Actions basic test job |
+| [`config-examples/docker-compose.yml`](../config-examples/docker-compose.yml) | conceptual Compose topology |
 
 Read the accompanying stack/operations chapter before using a template. Config files are not interchangeable: proxy headers, locations, socket paths, users, and TLS ownership must match the selected stack.
 
 ## Learn the templates line by line
 
-Use [Template walkthroughs](../reference/06-template-walkthroughs.md) when a config file is correct but still feels mysterious. It explains the important lines in the environment file, Django settings, Gunicorn service, Nginx site, Docker Compose file, and backup timers.
+Use [Configuration walkthroughs](../reference/configuration-walkthroughs.md) when a config file is correct but still feels mysterious. It explains the important lines in the environment file, Django settings, Gunicorn service, Nginx site, Docker Compose file, and backup timers.
 
 ---
 
-<!-- Source: reference/02-checklists.md -->
+<!-- Source: reference/checklists.md -->
 
 # Command checklists
 
@@ -4499,7 +4497,7 @@ Use [Template walkthroughs](../reference/06-template-walkthroughs.md) when a con
 
 ---
 
-<!-- Source: reference/03-troubleshooting.md -->
+<!-- Source: reference/troubleshooting.md -->
 
 # Troubleshooting map
 
@@ -4584,7 +4582,7 @@ git remote -v
 
 ---
 
-<!-- Source: reference/04-glossary.md -->
+<!-- Source: reference/glossary.md -->
 
 # Glossary
 
@@ -4627,7 +4625,7 @@ git remote -v
 
 ---
 
-<!-- Source: reference/05-official-sources.md -->
+<!-- Source: reference/official-sources.md -->
 
 # Official sources and continued learning
 
@@ -4647,7 +4645,8 @@ Use current official documentation when applying a real deployment. Versions and
 - [Ubuntu firewall documentation](https://documentation.ubuntu.com/security/security-features/network/firewall/)
 - [PostgreSQL documentation](https://www.postgresql.org/docs/)
 - [Certbot documentation](https://eff-certbot.readthedocs.io/)
-- [GitBook Git Sync](https://www.gitbook.com/features/git-sync)
+- [Read the Docs: MkDocs projects](https://docs.readthedocs.com/platform/stable/intro/mkdocs.html)
+- [MkDocs documentation](https://www.mkdocs.org/)
 - [GitHub Actions documentation](https://docs.github.com/actions)
 - [Semantic Versioning](https://semver.org/)
 
@@ -4655,13 +4654,13 @@ Read your installed software’s documentation and release notes before applying
 
 ---
 
-<!-- Source: reference/06-template-walkthroughs.md -->
+<!-- Source: reference/configuration-walkthroughs.md -->
 
-# Template walkthroughs: explain every important line
+# Configuration walkthroughs: explain every important line
 
-The `templates/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
+The `config-examples/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
 
-## `templates/app.env.example`
+## `config-examples/app.env.example`
 
 ```dotenv
 DJANGO_SECRET_KEY='replace-with-a-long-random-secret'
@@ -4694,7 +4693,7 @@ POSTGRES_PORT=5432
 
 These say Django should connect to PostgreSQL on the same server using PostgreSQL's default TCP port. If you move PostgreSQL to a private managed database, these values change.
 
-## `templates/django-production-settings.py`
+## `config-examples/django-production-settings.py`
 
 This file demonstrates a production settings shape. The most important idea is that code contains names of required settings, while the server supplies values.
 
@@ -4734,7 +4733,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 Use this only when the reverse proxy is trusted and Gunicorn/Uvicorn is private. It tells Django that requests with `X-Forwarded-Proto: https` were HTTPS at the public edge.
 
-## `templates/gunicorn.service`
+## `config-examples/gunicorn.service`
 
 ```ini
 [Unit]
@@ -4789,7 +4788,7 @@ RestartSec=5
 
 If Gunicorn crashes, systemd waits five seconds and starts it again. This helps with unexpected crashes but does not fix a permanent configuration error.
 
-## `templates/nginx-site.conf`
+## `config-examples/nginx-site.conf`
 
 ```nginx
 server_name <DOMAIN> <WWW_DOMAIN>;
@@ -4819,7 +4818,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 These headers preserve public request information so Django can make correct security and URL decisions.
 
-## `templates/docker-compose.yml`
+## `config-examples/docker-compose.yml`
 
 ```yaml
 services:
@@ -4849,7 +4848,7 @@ volumes:
 
 The database needs persistent storage. Without a volume, deleting the container can delete the database data.
 
-## `templates/db-backup.service` and `.timer`
+## `config-examples/db-backup.service` and `.timer`
 
 A systemd service describes what one backup run does. A systemd timer describes when that service runs.
 
@@ -4872,7 +4871,7 @@ Persistent=true
 
 This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
 
-## `templates/apache-gunicorn.conf`
+## `config-examples/apache-gunicorn.conf`
 
 ```apache
 <VirtualHost *:80>
@@ -4922,7 +4921,7 @@ ProxyPassReverse / http://127.0.0.1:8000/
 
 Forward dynamic requests to private Gunicorn and rewrite upstream redirect headers back into public-facing URLs.
 
-## `templates/apache-modwsgi.conf`
+## `config-examples/apache-modwsgi.conf`
 
 ```apache
 WSGIDaemonProcess <APP_NAME> \
@@ -4953,7 +4952,7 @@ Map the entire site to Django's WSGI entrypoint file.
 
 Allow Apache to load the WSGI entrypoint. This is not a permission to expose all source files as downloads.
 
-## `templates/Caddyfile`
+## `config-examples/Caddyfile`
 
 ```caddyfile
 <DOMAIN>, <WWW_DOMAIN> {
@@ -4988,7 +4987,7 @@ header_up X-Forwarded-Proto {scheme}
 
 Tell Django whether the original request was HTTP or HTTPS.
 
-## `templates/uvicorn.service`
+## `config-examples/uvicorn.service`
 
 ```ini
 ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
@@ -5000,7 +4999,7 @@ ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
 
 Start Uvicorn from the virtualenv, import Django's ASGI application, listen privately on localhost, use port 8001, and honor trusted proxy headers. Use this for ASGI/WebSocket deployments, not just because it is newer.
 
-## `templates/ci.yml`
+## `config-examples/ci.yml`
 
 ```yaml
 name: Django CI
@@ -5025,7 +5024,7 @@ Download the repository and install the requested Python version on the GitHub r
 
 Run Django checks and tests. These commands must pass before you trust the change.
 
-## `templates/db-backup.sh`
+## `config-examples/db-backup.sh`
 
 ```bash
 set -Eeuo pipefail

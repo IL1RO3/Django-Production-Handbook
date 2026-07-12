@@ -1,8 +1,8 @@
-# Template walkthroughs: explain every important line
+# Configuration walkthroughs: explain every important line
 
-The `templates/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
+The `config-examples/` directory contains copy-and-adapt starting points. Templates are not magic files. They are examples of how the layers connect. This chapter explains the most important lines so a beginner can edit them without guessing.
 
-## `templates/app.env.example`
+## `config-examples/app.env.example`
 
 ```dotenv
 DJANGO_SECRET_KEY='replace-with-a-long-random-secret'
@@ -35,7 +35,7 @@ POSTGRES_PORT=5432
 
 These say Django should connect to PostgreSQL on the same server using PostgreSQL's default TCP port. If you move PostgreSQL to a private managed database, these values change.
 
-## `templates/django-production-settings.py`
+## `config-examples/django-production-settings.py`
 
 This file demonstrates a production settings shape. The most important idea is that code contains names of required settings, while the server supplies values.
 
@@ -75,7 +75,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 Use this only when the reverse proxy is trusted and Gunicorn/Uvicorn is private. It tells Django that requests with `X-Forwarded-Proto: https` were HTTPS at the public edge.
 
-## `templates/gunicorn.service`
+## `config-examples/gunicorn.service`
 
 ```ini
 [Unit]
@@ -130,7 +130,7 @@ RestartSec=5
 
 If Gunicorn crashes, systemd waits five seconds and starts it again. This helps with unexpected crashes but does not fix a permanent configuration error.
 
-## `templates/nginx-site.conf`
+## `config-examples/nginx-site.conf`
 
 ```nginx
 server_name <DOMAIN> <WWW_DOMAIN>;
@@ -160,7 +160,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 These headers preserve public request information so Django can make correct security and URL decisions.
 
-## `templates/docker-compose.yml`
+## `config-examples/docker-compose.yml`
 
 ```yaml
 services:
@@ -190,7 +190,7 @@ volumes:
 
 The database needs persistent storage. Without a volume, deleting the container can delete the database data.
 
-## `templates/db-backup.service` and `.timer`
+## `config-examples/db-backup.service` and `.timer`
 
 A systemd service describes what one backup run does. A systemd timer describes when that service runs.
 
@@ -213,7 +213,7 @@ Persistent=true
 
 This schedules the backup every day at 03:15 UTC. `Persistent=true` lets systemd run a missed timer after the machine comes back online.
 
-## `templates/apache-gunicorn.conf`
+## `config-examples/apache-gunicorn.conf`
 
 ```apache
 <VirtualHost *:80>
@@ -263,7 +263,7 @@ ProxyPassReverse / http://127.0.0.1:8000/
 
 Forward dynamic requests to private Gunicorn and rewrite upstream redirect headers back into public-facing URLs.
 
-## `templates/apache-modwsgi.conf`
+## `config-examples/apache-modwsgi.conf`
 
 ```apache
 WSGIDaemonProcess <APP_NAME> \
@@ -294,7 +294,7 @@ Map the entire site to Django's WSGI entrypoint file.
 
 Allow Apache to load the WSGI entrypoint. This is not a permission to expose all source files as downloads.
 
-## `templates/Caddyfile`
+## `config-examples/Caddyfile`
 
 ```caddyfile
 <DOMAIN>, <WWW_DOMAIN> {
@@ -329,7 +329,7 @@ header_up X-Forwarded-Proto {scheme}
 
 Tell Django whether the original request was HTTP or HTTPS.
 
-## `templates/uvicorn.service`
+## `config-examples/uvicorn.service`
 
 ```ini
 ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
@@ -341,7 +341,7 @@ ExecStart=/srv/<APP_NAME>/venv/bin/uvicorn \
 
 Start Uvicorn from the virtualenv, import Django's ASGI application, listen privately on localhost, use port 8001, and honor trusted proxy headers. Use this for ASGI/WebSocket deployments, not just because it is newer.
 
-## `templates/ci.yml`
+## `config-examples/ci.yml`
 
 ```yaml
 name: Django CI
@@ -366,7 +366,7 @@ Download the repository and install the requested Python version on the GitHub r
 
 Run Django checks and tests. These commands must pass before you trust the change.
 
-## `templates/db-backup.sh`
+## `config-examples/db-backup.sh`
 
 ```bash
 set -Eeuo pipefail

@@ -1,0 +1,78 @@
+site_name: Django Production Deployment Guide
+site_description: A practical guide to deploying and operating Django in production
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: readthedocs
+  highlightjs: true
+  hljs_languages:
+    - bash
+    - django
+    - nginx
+    - python
+    - yaml
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - fenced_code
+  - footnotes
+  - sane_lists
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Production mental model: getting-started/production-mental-model.md
+      - Request journey: getting-started/request-journey.md
+      - Choose a stack: getting-started/choose-a-stack.md
+      - Variables and layout: getting-started/variables-and-layout.md
+  - Django application:
+      - Repository and dependencies: django-application/repository-and-dependencies.md
+      - Production settings and secrets: django-application/production-settings-and-secrets.md
+      - Static files, media, migrations, and health checks: django-application/static-media-migrations-health-checks.md
+      - WSGI and ASGI: django-application/wsgi-and-asgi.md
+      - Email, background tasks, and external services: django-application/email-background-tasks-and-services.md
+  - Server setup:
+      - VPS, DNS, and provider controls: server-setup/vps-dns-and-provider-controls.md
+      - SSH, users, and permissions: server-setup/ssh-users-and-permissions.md
+      - PostgreSQL: server-setup/postgresql.md
+      - systemd and environment files: server-setup/systemd-and-environment.md
+  - Deployment stacks:
+      - Gunicorn: deployment-stacks/gunicorn.md
+      - Nginx + Gunicorn + PostgreSQL: deployment-stacks/nginx-gunicorn-postgresql.md
+      - Apache + Gunicorn + PostgreSQL: deployment-stacks/apache-gunicorn-postgresql.md
+      - Apache + mod_wsgi: deployment-stacks/apache-mod-wsgi.md
+      - Caddy + Gunicorn: deployment-stacks/caddy-gunicorn.md
+      - ASGI and WebSockets: deployment-stacks/asgi-and-websockets.md
+      - Docker Compose: deployment-stacks/docker-compose.md
+      - Managed platforms and Kubernetes: deployment-stacks/managed-platforms-and-kubernetes.md
+      - uWSGI + Nginx: deployment-stacks/uwsgi-nginx.md
+      - Other options: deployment-stacks/other-options.md
+  - Security and operations:
+      - TLS and HTTPS: operations/tls-and-https.md
+      - Firewall, SSH, and host security: operations/firewall-ssh-and-host-security.md
+      - Deployment runbooks: operations/deployment-runbooks.md
+      - Observability and incidents: operations/observability-and-incidents.md
+      - Backups and disaster recovery: operations/backups-and-disaster-recovery.md
+      - Testing, CI, and staging: operations/testing-ci-and-staging.md
+      - Scaling: operations/scaling.md
+  - Open source:
+      - Publishing a project: open-source/publishing-a-project.md
+      - License, governance, and security: open-source/license-governance-and-security.md
+      - Releases and maintenance: open-source/releases-and-maintenance.md
+  - Reference:
+      - Configuration examples: reference/configuration-examples.md
+      - Checklists: reference/checklists.md
+      - Troubleshooting: reference/troubleshooting.md
+      - Glossary: reference/glossary.md
+      - Official sources: reference/official-sources.md
+      - Configuration walkthroughs: reference/configuration-walkthroughs.md
+  - Appendices:
+      - Complete handbook: appendices/complete-handbook.md
+  - Publishing on Read the Docs: read-the-docs-setup.md

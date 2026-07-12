@@ -59,4 +59,4 @@ POSTGRES_PORT=5432
 
 ## Documentation-as-code
 
-Keep technical documentation in Markdown next to the code. This makes setup instructions reviewable in pull requests and versioned alongside the code that they describe. GitBook Git Sync can publish that Markdown as a documentation site.
+Keep technical documentation in Markdown next to the code. This makes setup instructions reviewable in pull requests and versioned alongside the code that they describe. Read the Docs can build and publish that Markdown as a versioned documentation site.

@@ -30,7 +30,7 @@ It may look simpler to expose Django directly. Production layers exist because t
 | DNS | Human name to network address |
 | Reverse proxy | TLS, redirects, static files, client connection handling, access logs |
 | App server | Python worker lifecycle and WSGI/ASGI protocol |
-| Django | application rules, forms, ORM, authorization, templates/API |
+| Django | application rules, forms, ORM, authorization, config-examples/API |
 | PostgreSQL | durable transactions, indexes, concurrent data access |
 | systemd | start on boot, restart after failure, service logs |
 

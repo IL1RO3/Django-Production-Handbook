@@ -3,7 +3,6 @@
 .vscode/
 *.swp
 site/
-book/_book/
 .env
 .env.*
 !.env.example

@@ -4,7 +4,7 @@ The main stacks in this book cover the usual first choices. These tools are also
 
 ## Nginx Unit
 
-Nginx Unit is an application server from the Nginx ecosystem that can run application processes with dynamic configuration. It can fit teams already using Unit, but it is a different product from Nginx itself. Learn its application/process model before choosing it as a “simpler Nginx.”
+Nginx Unit is an application server from the Nginx ecosystem that can run application processes with dynamic configuration. It can fit teams already using Unit, but it is a different product from Nginx itself. Learn its django-application/process model before choosing it as a “simpler Nginx.”
 
 ## Waitress
 

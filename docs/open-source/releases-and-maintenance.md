@@ -66,7 +66,7 @@ Before publishing a release:
 - publish human-readable release notes;
 - announce breaking changes clearly.
 
-For a GitBook, also verify that navigation renders correctly after Git sync and that renamed pages do not leave broken links.
+For Read the Docs, run `mkdocs build --strict` and verify that navigation renders correctly and renamed pages do not leave broken links.
 
 ## Maintenance rhythm
 

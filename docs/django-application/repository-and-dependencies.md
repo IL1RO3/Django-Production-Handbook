@@ -14,9 +14,9 @@ myproject/
 │   ├── wsgi.py
 │   └── asgi.py
 ├── web/
-├── templates/
+├── config-examples/
 ├── static/
-├── deploy/                 # public templates/scripts only
+├── deploy/                 # public config-examples/scripts only
 ├── docs/
 ├── README.md
 ├── LICENSE
