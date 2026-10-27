@@ -1,4 +1,4 @@
-# 30. Scaling without premature complexity
+# 34. Scaling without premature complexity
 
 Scaling is not only adding servers. First identify the bottleneck.
 

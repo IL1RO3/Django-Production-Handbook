@@ -10,6 +10,7 @@ theme:
   hljs_languages:
     - bash
     - django
+    - dockerfile
     - nginx
     - python
     - yaml
@@ -50,7 +51,12 @@ nav:
       - Apache + mod_wsgi: deployment-stacks/apache-mod-wsgi.md
       - Caddy + Gunicorn: deployment-stacks/caddy-gunicorn.md
       - ASGI and WebSockets: deployment-stacks/asgi-and-websockets.md
-      - Docker Compose: deployment-stacks/docker-compose.md
+      - Dockerization from zero:
+          - Docker fundamentals: dockerization/docker-concepts.md
+          - Your first Dockerfile for Django: dockerization/dockerfile-from-zero.md
+          - Build, run, and multi-stage images: dockerization/build-and-run.md
+          - Docker Compose from zero: dockerization/docker-compose-from-zero.md
+          - Docker in production: dockerization/production-docker.md
       - Managed platforms and Kubernetes: deployment-stacks/managed-platforms-and-kubernetes.md
       - uWSGI + Nginx: deployment-stacks/uwsgi-nginx.md
       - Other options: deployment-stacks/other-options.md

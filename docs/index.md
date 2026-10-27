@@ -17,7 +17,8 @@ You know basic Linux commands, Python, Git, and Django. You may never have deplo
 
 - The request path: browser → DNS → firewall → reverse proxy → application server → Django → database.
 - Django production configuration, static/media handling, secrets, migrations, and health checks.
-- Major server stacks: **Nginx + Gunicorn**, **Apache + Gunicorn**, **Apache + mod_wsgi**, **Caddy + Gunicorn**, **ASGI with Uvicorn/Daphne/Hypercorn**, Docker Compose, managed platforms, and a practical introduction to Kubernetes.
+- Major server stacks: **Nginx + Gunicorn**, **Apache + Gunicorn**, **Apache + mod_wsgi**, **Caddy + Gunicorn**, **ASGI with Uvicorn/Daphne/Hypercorn**, and a practical introduction to Kubernetes.
+- **Dockerization from zero**: what containers are, writing your first Dockerfile, building and running images, Docker Compose, and running Docker in production.
 - Ubuntu/VPS provisioning, SSH, UFW, Fail2Ban, TLS/Let’s Encrypt, systemd, PostgreSQL, monitoring, backup/restore, CI, staging, releases, and incident response.
 - How to package the application as a responsible open-source project.
 

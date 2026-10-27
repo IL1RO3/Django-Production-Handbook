@@ -67,6 +67,8 @@ Docker Compose describes multi-service environments such as web, database, Redis
 
 **Trade-offs:** containers do not replace TLS, backups, security, or operations. They add image builds, registries, volume strategy, and container networking to learn.
 
+For a from-zero walkthrough, see [Dockerization from zero](../dockerization/docker-concepts.md).
+
 ### Managed PaaS
 
 A Platform-as-a-Service deploys code/images and usually provides routing, TLS, logs, managed databases, or a built-in deployment pipeline.

@@ -1,4 +1,4 @@
-# 31. Publishing an open-source project
+# 35. Publishing an open-source project
 
 Public code is not automatically an open-source project. A usable public project needs a license, accurate setup instructions, contribution expectations, and a security path.
 

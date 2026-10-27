@@ -1,4 +1,4 @@
-# 27. Logging, monitoring, and incident response
+# 31. Logging, monitoring, and incident response
 
 ## Logs are evidence
 

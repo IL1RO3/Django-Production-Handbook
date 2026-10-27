@@ -1,0 +1,45 @@
+# Copy this file to the project root and rename it to `.dockerignore`
+# (the leading dot matters; the template omits it so documentation tools can serve it).
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime-generated data (created by collectstatic or uploaded by users)
+staticfiles/
+media/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Documentation and CI
+docs/
+.github/
+*.md
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore

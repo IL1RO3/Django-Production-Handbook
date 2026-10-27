@@ -1,4 +1,4 @@
-# 32. License, governance, contribution, and security policy
+# 36. License, governance, contribution, and security policy
 
 ## Choose a license intentionally
 

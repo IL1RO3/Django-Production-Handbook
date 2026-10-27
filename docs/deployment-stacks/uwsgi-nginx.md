@@ -1,4 +1,4 @@
-# 22. uWSGI + Nginx
+# 26. uWSGI + Nginx
 
 uWSGI is another production WSGI application server. Django documents how to integrate it with Django, and Nginx can proxy to it using the uWSGI protocol.
 

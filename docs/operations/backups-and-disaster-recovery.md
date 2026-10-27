@@ -1,4 +1,4 @@
-# 28. Backups, restore drills, and disaster recovery
+# 32. Backups, restore drills, and disaster recovery
 
 A backup is only useful if it can be restored. A backup stored only on the same VPS is not sufficient for full server loss.
 

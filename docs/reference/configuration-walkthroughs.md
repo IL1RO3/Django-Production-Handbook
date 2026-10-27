@@ -160,6 +160,64 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 These headers preserve public request information so Django can make correct security and URL decisions.
 
+## `config-examples/Dockerfile`
+
+```dockerfile
+FROM python:3.13-slim
+```
+
+Base the image on an official, pinned Python image. Prefer the `-slim` variant for Django; it omits compilers and documentation that a runtime image does not need.
+
+```dockerfile
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+```
+
+These keep the image small (no `.pyc` files, no pip cache) and make logs appear immediately instead of sitting in Python's output buffer.
+
+```dockerfile
+WORKDIR /app
+```
+
+Set the working directory so later `COPY`, `RUN`, and `CMD` instructions operate in a known absolute path.
+
+```dockerfile
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+```
+
+Copy and install dependencies before copying the application code. This caches the expensive install layer until `requirements.txt` changes.
+
+```dockerfile
+COPY . .
+```
+
+Copy the application source. A `.dockerignore` file must keep `.git`, `.env`, virtual environments, and generated data out of the build context.
+
+```dockerfile
+RUN addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/staticfiles /app/media \
+    && chown -R app:app /app
+
+USER app
+```
+
+Create a dedicated non-root user and switch to it. The user owns only the directories the app must write to (`staticfiles`, `media`), not the whole filesystem.
+
+```dockerfile
+EXPOSE 8000
+```
+
+Document the port Gunicorn listens on inside the container. It does not publish the port; that is a separate `docker run -p` or Compose `ports` decision.
+
+```dockerfile
+CMD ["gunicorn", "<PROJECT_PACKAGE>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+```
+
+Run Gunicorn as the default command. Bind to `0.0.0.0` inside the container; Docker controls which ports are exposed to the outside.
+
 ## `config-examples/docker-compose.yml`
 
 ```yaml

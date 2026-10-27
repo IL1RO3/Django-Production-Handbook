@@ -1,4 +1,4 @@
-# 29. Testing, CI, staging, and smoke tests
+# 33. Testing, CI, staging, and smoke tests
 
 ## Testing ladder
 

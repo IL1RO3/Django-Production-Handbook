@@ -1,4 +1,4 @@
-# 23. Other valid options and where they fit
+# 27. Other valid options and where they fit
 
 The main stacks in this book cover the usual first choices. These tools are also valid in particular environments.
 

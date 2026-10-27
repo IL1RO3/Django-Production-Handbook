@@ -51,3 +51,22 @@
 [ ] DNS cutover completed and old server retained briefly for rollback.
 [ ] backups/monitoring recreated on target.
 ```
+
+## Docker deployment
+
+```text
+[ ] Dockerfile pins a specific base image; no :latest.
+[ ] .dockerignore excludes .env, .git, venv, staticfiles/, and media/.
+[ ] container runs as a non-root user.
+[ ] no secrets baked into image layers or committed .env.
+[ ] dependencies pinned in requirements.txt; psycopg[binary] or driver chosen.
+[ ] image built with a version tag and pushed to a registry.
+[ ] database and media on named volumes or external storage.
+[ ] PostgreSQL/Redis ports not published publicly.
+[ ] healthchecks defined for db (and web where useful).
+[ ] restart policy set (unless-stopped).
+[ ] migrations and collectstatic run as one-off containers before switch.
+[ ] backup command tested and scheduled off-host.
+[ ] log rotation/limits configured.
+[ ] rollback path verified (previous image tag still available).
+```

@@ -25,7 +25,8 @@ You know basic Linux commands, Python, Git, and Django. You may never have deplo
 
 - The request path: browser → DNS → firewall → reverse proxy → application server → Django → database.
 - Django production configuration, static/media handling, secrets, migrations, and health checks.
-- Major server stacks: **Nginx + Gunicorn**, **Apache + Gunicorn**, **Apache + mod_wsgi**, **Caddy + Gunicorn**, **ASGI with Uvicorn/Daphne/Hypercorn**, Docker Compose, managed platforms, and a practical introduction to Kubernetes.
+- Major server stacks: **Nginx + Gunicorn**, **Apache + Gunicorn**, **Apache + mod_wsgi**, **Caddy + Gunicorn**, **ASGI with Uvicorn/Daphne/Hypercorn**, and a practical introduction to Kubernetes.
+- **Dockerization from zero**: what containers are, writing your first Dockerfile, building and running images, Docker Compose, and running Docker in production.
 - Ubuntu/VPS provisioning, SSH, UFW, Fail2Ban, TLS/Let’s Encrypt, systemd, PostgreSQL, monitoring, backup/restore, CI, staging, releases, and incident response.
 - How to package the application as a responsible open-source project.
 
@@ -322,6 +323,8 @@ Docker Compose describes multi-service environments such as web, database, Redis
 **Advantages:** reproducible dependencies; developer/prod parity; useful for teams and multi-service apps.
 
 **Trade-offs:** containers do not replace TLS, backups, security, or operations. They add image builds, registries, volume strategy, and container networking to learn.
+
+For a from-zero walkthrough, see [Dockerization from zero](../dockerization/docker-concepts.md).
 
 ### Managed PaaS
 
@@ -2657,31 +2660,500 @@ Redis should be private. If Redis is only used as a channel layer/cache, its bac
 
 ---
 
-<!-- Source: deployment-stacks/docker-compose.md -->
+<!-- Source: dockerization/docker-concepts.md -->
 
-# 20. Docker Compose
+# 20. Docker fundamentals: images, containers, and layers
 
-Docker packages processes and dependencies into images/containers. Docker Compose describes a multi-service application in YAML.
+Docker packages an application and everything it needs to run into a portable unit called an **image**. A running copy of that image is a **container**. This chapter explains those ideas from zero, so the Dockerfile and Compose chapters that follow make sense.
 
-## What it solves
+## Why Docker exists
 
-- reproducible dependency versions,
-- consistent local/CI/server service topology,
-- explicit network and volume configuration,
-- easier separation between web, worker, database, cache, and proxy services.
+A Django project on your laptop works because of a long chain of assumptions: a specific Python version, a virtual environment, system packages such as `libpq`, environment variables, and a particular directory layout. When the same code runs on another machine, any difference in that chain can break it.
 
-## What it does not solve
+Docker turns that chain into a **build recipe** (the Dockerfile) that produces a **portable image**. The image contains the operating system libraries, Python interpreter, dependencies, and your code. Containers run from that image with a predictable, isolated filesystem, network, and process tree.
 
-Containers do not automatically give you secure secrets, TLS, backups, monitoring, database durability, firewall policy, or a good deployment strategy. They make these concerns more explicit; they do not erase them.
+## Containers are not virtual machines
 
-## Minimal conceptual Compose topology
+| | Virtual machine | Container |
+|---|---|---|
+| Isolates | a full guest OS on virtualized hardware | a process and its filesystem/network on a shared host kernel |
+| Start time | seconds to minutes | milliseconds to seconds |
+| Overhead | a whole OS per VM | small; containers share the host kernel |
+| Disk use | large disk image per VM | layers shared and cached between images |
+
+A container is a normal Linux process with extra isolation provided by the kernel (namespaces for process/network/filesystem, and cgroups for resource limits). It does **not** contain its own kernel. This is why containers are fast and cheap, and why the host kernel's version still matters.
+
+## Image, container, registry: three different things
+
+| Thing | Meaning | Analogy |
+|---|---|---|
+| image | a read-only, built package of files, layers, and metadata | a template or a class definition |
+| container | a running instance of an image with its own writable layer | an object instantiated from the class |
+| registry | a place that stores and distributes images | a package index such as PyPI, but for images |
+
+Docker Hub is the default public registry. `docker pull python:3.13-slim` downloads an image; `docker run` creates a container from it. Deleting a container does not delete the image, and deleting an image does not affect a running container that was already started from it.
+
+## Layers and why they matter
+
+An image is built from a sequence of instructions in a Dockerfile. Each instruction that changes the filesystem (`RUN`, `COPY`, `ADD`) produces a **layer**. Layers stack on top of each other, and Docker caches each one.
+
+```dockerfile
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+```
+
+Because `requirements.txt` rarely changes while code changes constantly, putting `COPY requirements.txt` before `COPY . .` means the dependency-install layer is reused on every rebuild. Reordering these two lines makes every build reinstall dependencies, which is slower but not incorrect. Layer ordering is a speed and caching decision, not magic.
+
+## The basic workflow
+
+```text
+write Dockerfile  →  docker build  →  image  →  docker run  →  container
+                          ↑                    ↓
+                     push to registry     pull from registry (other machines)
+```
+
+You build an image once, store it in a registry, and run the same image on your laptop, a CI runner, and the production server. The same bytes produce the same behavior everywhere, which is the core Docker promise.
+
+## What Docker gives Django
+
+- Reproducible Python and system dependencies across machines.
+- A clear place to state the exact runtime: base image, packages, environment.
+- Easy multi-service topology (web, database, cache, worker, proxy) via Compose.
+- A deployable artifact (the image) that is independent of a specific server's installed Python.
+
+## What Docker does not give you
+
+Docker does **not** automatically provide:
+
+- secure secrets handling,
+- TLS certificates and HTTPS,
+- database backups and durability,
+- monitoring, logging rotation, or alerting,
+- a firewall policy,
+- a safe deployment or rollback strategy.
+
+Containers make these concerns more explicit and more portable, but they do not solve them. A Dockerized Django app with `DEBUG=True`, no backups, and an exposed PostgreSQL port is just as broken as a non-Docker one.
+
+## When Docker is worth it
+
+Use Docker when repeatability and multi-service clarity help your team, when you deploy to a platform that consumes images, or when you want the same environment in development, CI, and production.
+
+Do not adopt Docker for a single-process hobby project purely for fashion. A well-managed systemd deployment can be simpler and safer for that case. See [Choose your stack](../getting-started/choose-a-stack.md) for the decision matrix.
+
+## Next
+
+The rest of this section builds up the full toolchain: [write a Dockerfile](../dockerization/dockerfile-from-zero.md), [build and run images](../dockerization/build-and-run.md), [compose multiple services](../dockerization/docker-compose-from-zero.md), and [operate Docker in production](../dockerization/production-docker.md).
+
+---
+
+<!-- Source: dockerization/dockerfile-from-zero.md -->
+
+# 21. Your first Dockerfile for Django
+
+A **Dockerfile** is a text file named `Dockerfile` (no extension) that describes how to build an image. It lives in the repository root, next to `manage.py`. This chapter explains each instruction by building a working Django image from zero.
+
+## A minimal starting point
+
+```dockerfile
+FROM python:3.13-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+
+CMD ["gunicorn", "<PROJECT_PACKAGE>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+```
+
+This is already a valid image. It is not production-ready yet, but it shows the shape. Let us explain each line.
+
+## The instructions line by line
+
+### `FROM`
+
+```dockerfile
+FROM python:3.13-slim
+```
+
+`FROM` chooses the base image every other instruction builds on top of. Use the official `python` image and pin a specific version, for example `python:3.13-slim`. Do not use `python:latest`: a floating tag can change the meaning of your build overnight.
+
+- `python:3.13-slim` is a smaller Debian-based image without compilers and documentation. Prefer it for Django.
+- `python:3.13-alpine` is even smaller but uses musl libc, which can cause subtle problems with compiled Python packages. It is rarely worth the trouble for Django.
+- `python:3.13` (no suffix) includes the full Debian toolchain and is much larger. Use it only if you genuinely need it.
+
+### `WORKDIR`
+
+```dockerfile
+WORKDIR /app
+```
+
+`WORKDIR` sets the working directory for all following `RUN`, `COPY`, `CMD`, and `ENTRYPOINT` instructions. It also creates the directory if it does not exist. Use an absolute path, not a relative one.
+
+### `ENV`
+
+```dockerfile
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+```
+
+These two environment variables make Python behave better inside a container:
+
+- `PYTHONDONTWRITEBYTECODE=1` stops Python from writing `.pyc` files, which keeps the image smaller.
+- `PYTHONUNBUFFERED=1` makes Python print logs immediately instead of buffering them, so `docker logs` shows output in real time.
+
+### `COPY`
+
+```dockerfile
+COPY requirements.txt .
+COPY . .
+```
+
+`COPY <source> <destination>` copies files from the **build context** (the directory you pass to `docker build`) into the image. Prefer `COPY` over `ADD`; `ADD` has extra behavior for archives and URLs that you almost never need.
+
+Copy `requirements.txt` first and install dependencies before copying the rest of the code. This keeps the expensive `pip install` layer cached while you iterate on application code.
+
+### `RUN`
+
+```dockerfile
+RUN pip install -r requirements.txt
+```
+
+`RUN` executes a command during the build and records the result as a new layer. This is where dependencies are installed, not where the application is started.
+
+### `CMD`
+
+```dockerfile
+CMD ["gunicorn", "<PROJECT_PACKAGE>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+```
+
+`CMD` defines the default command to run when a container starts. The `["..."]` (exec) form is preferred because it avoids invoking a shell and does not mangle arguments or signals.
+
+Inside a container, Gunicorn must bind to `0.0.0.0`, not `127.0.0.1`. Binding to `0.0.0.0` means "listen on all interfaces **inside this container**"; it does not publish the port to the public internet. Port publishing is a separate `docker run -p` or Compose `ports` decision.
+
+## `CMD` versus `ENTRYPOINT`
+
+| Instruction | Purpose | Overridable? |
+|---|---|---|
+| `ENTRYPOINT` | the fixed program to run (for example an entrypoint script) | no, without `--entrypoint` |
+| `CMD` | default arguments/command, often the server itself | yes, `docker run <image> <command>` overrides it |
+
+For a first Django image, `CMD` alone is enough. Advanced setups use an `ENTRYPOINT` script that waits for the database, runs migrations, then `exec`s the server.
+
+## The `.dockerignore` file
+
+By default `docker build` sends the entire build context to the Docker daemon. If your repository contains a `.git` directory, a `venv/`, uploaded `media/` files, or a `.env` file, all of it is transmitted and can be copied into the image.
+
+A `.dockerignore` file in the project root excludes files from the context, exactly like `.gitignore` excludes files from Git:
+
+```text
+.git
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+staticfiles/
+media/
+docs/
+Dockerfile
+.dockerignore
+```
+
+Two rules matter most:
+
+1. **Never copy `.env` or any real secret into the image.** A secret baked into a layer is hard to remove and easy to leak through a registry.
+2. **Exclude generated data** (`staticfiles/`, `media/`) that is created by `collectstatic` or uploaded at runtime. It belongs in a volume or in object storage, not in the image.
+
+A ready-to-adapt template is in [`config-examples/dockerignore.example`](../config-examples/dockerignore.example); copy it to `.dockerignore` in your project root. The template omits the leading dot so documentation tools can serve it.
+
+## Dependencies: the PostgreSQL driver question
+
+Django needs a PostgreSQL driver installed in the image. The modern choice is **psycopg 3**:
+
+```text
+# requirements.txt
+Django==5.2.*
+gunicorn==23.*
+psycopg[binary]==3.2.*
+```
+
+`psycopg[binary]` bundles its own copy of `libpq`, so you do **not** need to install `build-essential` and `libpq-dev` into the image. This keeps the Dockerfile simple.
+
+If you instead use `psycopg2` (source build) or `psycopg2-binary`, you must install the matching system packages first:
+
+```dockerfile
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Prefer `psycopg[binary]` for a first deployment and move to a source build later if your environment requires it. Always pin versions in `requirements.txt`.
+
+## Running as a non-root user
+
+By default a container's main process runs as **root**. If an attacker escapes the Python process, being root inside the container makes privilege escalation to the host far easier.
+
+Create a dedicated user and switch to it:
+
+```dockerfile
+RUN addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/staticfiles /app/media \
+    && chown -R app:app /app
+
+USER app
+```
+
+The `--system` flags create a user without a password and without a home directory, which is what you want for a service account. Give it ownership only of the directories the app must write to (such as `staticfiles` and `media`), not the whole filesystem.
+
+## The complete first Dockerfile
+
+Putting it together:
+
+```dockerfile
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+COPY . .
+
+RUN addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/staticfiles /app/media \
+    && chown -R app:app /app
+
+USER app
+
+EXPOSE 8000
+
+CMD ["gunicorn", "<PROJECT_PACKAGE>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+```
+
+`EXPOSE 8000` documents the port but does not publish it. `PIP_NO_CACHE_DIR=1` prevents pip from caching into the image, saving space.
+
+This file is available as [`config-examples/Dockerfile`](../config-examples/Dockerfile). In the next chapter you will build it, run it, and then reduce it further with a multi-stage build.
+
+---
+
+<!-- Source: dockerization/build-and-run.md -->
+
+# 22. Build, run, and multi-stage images
+
+A Dockerfile is only useful once you can build it into an image, run it as a container, and inspect what happened. This chapter covers the everyday commands and the multi-stage technique that shrinks production images.
+
+## Build an image
+
+```bash
+docker build -t <APP_NAME>:0.1.0 .
+```
+
+- `-t <APP_NAME>:0.1.0` tags the image with a name and version.
+- `.` is the **build context**, the directory Docker sends to the daemon and the root that `COPY` paths are relative to.
+
+Run the build from the repository root, where the `Dockerfile` and `.dockerignore` live.
+
+### Useful build flags
+
+| Flag | Effect |
+|---|---|
+| `-t, --tag` | name the image (repeatable for multiple tags) |
+| `--no-cache` | rebuild every layer, ignoring the cache |
+| `--pull` | fetch a fresh copy of the base image |
+| `--progress=plain` | show plain output instead of the fancy progress UI |
+
+## Inspect images
+
+```bash
+docker images
+docker image ls <APP_NAME>
+docker image history <APP_NAME>:0.1.0
+docker image inspect <APP_NAME>:0.1.0
+```
+
+`docker image history` shows each layer and its size, which is how you find a bloated layer. `docker image inspect` shows the metadata, including the configured `Cmd`, `Env`, and `User`.
+
+## Run a container
+
+```bash
+docker run --rm -p 8000:8000 --env-file .env <APP_NAME>:0.1.0
+```
+
+| Flag | Effect |
+|---|---|
+| `--rm` | delete the container when it stops (useful for testing) |
+| `-p 8000:8000` | publish host port 8000 to container port 8000 |
+| `--env-file .env` | load environment variables from a file into the container |
+| `--name <name>` | give the container a stable name |
+| `-d` | run detached in the background |
+| `-it` | run interactively with a TTY |
+
+The port mapping syntax is `host:container`. Publishing `8000:8000` makes the container reachable on your machine's port 8000. **Do not publish the PostgreSQL or Redis port** in production; those services should stay on the private container network.
+
+## Run commands inside a container
+
+`docker run` starts the image's default command. To run a different command instead, either pass it after the image name or use `docker exec` on an already-running container:
+
+```bash
+# Run a one-off container for a management command.
+docker run --rm --env-file .env <APP_NAME>:0.1.0 python manage.py migrate
+
+# Open a shell in a running container.
+docker exec -it <APP_NAME>_web_1 bash
+```
+
+Typical tasks that run as one-off containers or `exec` commands:
+
+```bash
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py createsuperuser
+python manage.py check --deploy
+```
+
+These are the same Django commands you already know, executed inside the container's environment.
+
+## See logs and state
+
+```bash
+docker ps                       # running containers
+docker ps -a                    # all containers, including stopped ones
+docker logs <container>         # print stdout/stderr
+docker logs -f <container>      # follow logs live
+docker stop <container>         # graceful stop (SIGTERM, then SIGKILL)
+docker rm <container>           # delete a stopped container
+```
+
+`docker ps` shows each container's image, status, and published ports. If a container exits immediately, `docker logs` usually explains why (for example a missing environment variable or a bad `ALLOWED_HOSTS`).
+
+## Layer caching in practice
+
+Docker caches each layer keyed on the instruction and its inputs. The classic mistake is:
+
+```dockerfile
+COPY . .
+RUN pip install -r requirements.txt
+```
+
+Every code change invalidates `COPY . .`, so the following `RUN pip install` reruns on every build. The correct order installs dependencies first:
+
+```dockerfile
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+```
+
+Now `pip install` only reruns when `requirements.txt` changes.
+
+## Tagging and versioning
+
+Never deploy a bare `latest` tag and never rely on it meaning "newest". Give each build a specific version and, when you are ready, also tag it as the current release:
+
+```bash
+docker build -t <APP_NAME>:0.1.0 .
+docker tag <APP_NAME>:0.1.0 <APP_NAME>:latest
+```
+
+Specific tags make rollback possible: you can always run or redeploy the exact image that worked yesterday.
+
+## Multi-stage builds
+
+A multi-stage build uses more than one `FROM` instruction. The early stages prepare artifacts; the final stage copies only what it needs. This leaves compilers and build tools out of the shipped image.
+
+```dockerfile
+# ---- Stage 1: builder ----
+FROM python:3.13-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+# ---- Stage 2: runtime ----
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Only the runtime library, not the compiler toolchain.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*.whl \
+    && rm -rf /wheels
+
+COPY . .
+
+RUN mkdir -p /app/staticfiles /app/media && chown -R app:app /app
+
+USER app
+
+EXPOSE 8000
+
+CMD ["gunicorn", "<PROJECT_PACKAGE>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+```
+
+How it works:
+
+1. The `builder` stage installs the compiler toolchain, then runs `pip wheel` to build `.whl` files into `/wheels`.
+2. The `runtime` stage installs only `libpq5` (the shared library), copies the wheels, and installs them with `--no-index --find-links=/wheels` so pip cannot reach the network.
+3. `COPY --from=builder /wheels /wheels` copies artifacts from the named stage. The builder stage is discarded when the build finishes.
+
+The result is a smaller image without `gcc`, headers, or the wheel cache. When you use `psycopg[binary]` and have no packages that compile C extensions, a multi-stage build saves less, and the single-stage Dockerfile from the previous chapter is perfectly fine. Use multi-stage when your dependencies require compiling.
+
+## Debugging a build
+
+- `docker build --progress=plain --no-cache .` shows every layer and its output without the progress UI.
+- If a `RUN` step fails, its output is printed. The usual causes are a missing system package, a network/proxy problem, or a Python package that cannot compile.
+- If the image builds but the container exits, inspect it with `docker logs` and `docker inspect`, or override the command to get a shell: `docker run --rm -it <image> bash`.
+
+## Next
+
+A single container is not enough for a Django application with a database. [Docker Compose](../dockerization/docker-compose-from-zero.md) describes the whole multi-service topology in one file.
+
+---
+
+<!-- Source: dockerization/docker-compose-from-zero.md -->
+
+# 23. Docker Compose from zero
+
+Docker Compose describes a multi-service application in a single YAML file. Instead of starting the web app, database, cache, worker, and proxy with separate `docker run` commands, you declare them once and manage them together.
+
+## Compose, not "docker-compose"
+
+Compose v2 ships as a Docker plugin invoked with a space: `docker compose`. The old `docker-compose` (hyphenated) binary is deprecated. The rest of this chapter uses `docker compose`.
+
+## Minimal conceptual topology
 
 ```text
 Caddy/Nginx container → web (Gunicorn/Uvicorn) container → PostgreSQL container
                                         ↘ Redis/worker container (optional)
 ```
 
-## Example `docker-compose.yml`
+## A complete `docker-compose.yml`
 
 ```yaml
 services:
@@ -2727,101 +3199,168 @@ volumes:
   static_data:
 ```
 
-This is a conceptual starting point, not a copy-paste production answer. You must decide how `collectstatic` populates the static volume, how media persists, how backups access the database, where production secrets come from, and how image versions are pinned.
+This is a conceptual starting point, not a copy-paste production answer. You still must decide how `collectstatic` populates the static volume, how media persists, how backups reach the database, where production secrets come from, and how image versions are pinned. The walkthrough below explains each block.
 
-## Docker security baseline
+## Walk through the file
 
-- Do not put secrets in Dockerfile `ENV` instructions or commit real `.env` files.
-- Run containers as non-root where practical.
-- Pin base images and rebuild for security updates.
-- Do not publish database/cache ports unless intentionally private/restricted.
-- Persist database and media with named volumes or external storage.
-- Back up database data outside the Docker host.
+### `services:`
 
-## When Compose is worth it
+`services` is the top-level map of containers Compose should run. Each service gets a name, a network identity, and its own configuration.
 
-Use it when repeatability and multi-service clarity help your team. Do not force Docker into a one-process hobby project purely for fashion; a well-managed systemd deployment can be simpler and safer for that case.
-
-## Walk through the Compose file
-
-```yaml
-services:
-```
-
-`services` is the top-level map of containers Compose should run. Each service gets a name, network identity, and configuration.
+### `web` — the Django app
 
 ```yaml
 web:
   build: .
 ```
 
-The `web` service is your Django app container. `build: .` tells Docker to build an image from the Dockerfile in the current directory.
+`build: .` tells Compose to build an image from the `Dockerfile` in the current directory. If you already push a pre-built image to a registry, use `image: <registry>/<APP_NAME>:0.1.0` instead of `build:`.
 
 ```yaml
-command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
+  command: gunicorn <PROJECT_PACKAGE>.wsgi:application --bind 0.0.0.0:8000 --workers 3
 ```
 
-This is the process the web container runs. Inside a container, binding to `0.0.0.0` means "listen on all interfaces inside the container." It does not automatically publish the port to the public internet.
+This overrides the Dockerfile's `CMD` with the process the web container runs. Inside a container, binding to `0.0.0.0` means "listen on all interfaces inside the container"; it does not publish the port publicly.
 
 ```yaml
-env_file: .env
+  env_file: .env
 ```
 
-Compose loads environment variables from `.env`. Do not commit a real production `.env` file.
+Compose loads environment variables from `.env` into the container. Never commit a real production `.env` file.
 
 ```yaml
-depends_on:
-  db:
-    condition: service_healthy
+  depends_on:
+    db:
+      condition: service_healthy
 ```
 
-This asks Compose to wait until the database health check passes before starting the web service. It helps startup order, but the application should still handle temporary database failures gracefully.
+Compose waits until the database health check passes before starting the web service. It helps startup order, but the application should still handle temporary database failures gracefully.
 
 ```yaml
-expose:
-  - "8000"
+  expose:
+    - "8000"
 ```
 
-`expose` documents and opens the port to other Compose services on the internal network. It is not the same as `ports`, which publishes a port to the host.
+`expose` documents and opens the port to other Compose services on the internal network. It is **not** the same as `ports`, which publishes a port to the host.
+
+### `db` — PostgreSQL
 
 ```yaml
-volumes:
-  - postgres_data:/var/lib/postgresql/data
+db:
+  image: postgres:16
 ```
 
-This stores PostgreSQL data in a named volume. Without persistent storage, deleting/recreating the database container can destroy data.
+The `db` service runs the official PostgreSQL image. Pin a major version deliberately; changing database major versions is an upgrade project, not a casual edit.
 
 ```yaml
-healthcheck:
-  test: ["CMD-SHELL", "pg_isready -U <DB_USER> -d <DB_NAME>"]
+  environment:
+    POSTGRES_DB: <DB_NAME>
+    POSTGRES_USER: <DB_USER>
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 ```
 
-This tells Compose how to ask PostgreSQL whether it is ready to accept connections.
+The `postgres` image uses these variables to initialize the database on first run. `${POSTGRES_PASSWORD}` is substituted by Compose from your environment or `.env` file; it is not passed to the web container.
 
 ```yaml
-ports:
-  - "80:80"
-  - "443:443"
+  volumes:
+    - postgres_data:/var/lib/postgresql/data
+```
+
+This stores PostgreSQL data in a named volume. Without persistent storage, deleting or recreating the container can destroy the database.
+
+```yaml
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U <DB_USER> -d <DB_NAME>"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+```
+
+This tells Compose how to ask PostgreSQL whether it is ready to accept connections. A service is "healthy" only when the check succeeds, which `depends_on: condition: service_healthy` waits for.
+
+### `proxy` — the public front door
+
+```yaml
+proxy:
+  image: caddy:2
+  ports:
+    - "80:80"
+    - "443:443"
 ```
 
 The proxy publishes HTTP and HTTPS from the host to the container. Do not publish PostgreSQL or Redis this way for a normal public deployment.
 
-## Development Compose versus production Compose
+```yaml
+  volumes:
+    - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    - caddy_data:/data
+    - static_data:/srv/static:ro
+```
 
-Development Compose often mounts source code into the container, enables reloaders, uses simple passwords, and exposes convenience ports. Production Compose should use built images, private networks, real secret handling, pinned versions, backups, logs, and controlled public ports.
+This mounts the proxy configuration and persistent data. The `static_data` volume is where collected static files land so the proxy can serve them directly, keeping Django workers free for dynamic requests. The example omits the web side of that wiring: you must decide where `collectstatic` runs and how it populates the volume.
 
-Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.
+## Volumes: named versus bind mount
 
-## Compose networking mental model
+| Kind | Syntax | Use |
+|---|---|---|
+| named volume | `postgres_data:/var/lib/postgresql/data` | durable data Docker manages, such as the database |
+| bind mount | `./Caddyfile:/etc/caddy/Caddyfile:ro` | a host file or directory, such as a config file |
 
-Compose creates a private network for services. Services can reach each other by service name:
+Named volumes are the right choice for the database and anything that must survive container replacement. Bind mounts are convenient for config files you edit on the host. The `:ro` suffix makes a bind mount read-only.
+
+## Networking mental model
+
+Compose creates a private network for the services. Each service is reachable by its service name:
 
 ```text
 web container -> db:5432
 proxy container -> web:8000
 ```
 
-Inside Compose, `db` is a DNS name. From your laptop or the public internet, `db` is not automatically reachable. Public access happens only through published `ports`.
+Inside Compose, `db` is a DNS name, not a public address. From your laptop or the public internet, `db` is not automatically reachable. Public access happens only through published `ports`.
+
+## Compose commands
+
+```bash
+docker compose up --build      # build images and start services in the foreground
+docker compose up -d --build   # the same, detached
+docker compose ps              # list services and their status
+docker compose logs -f web     # follow the web service logs
+docker compose down            # stop and remove containers (keeps volumes)
+docker compose down -v         # also remove named volumes (deletes database data)
+docker compose build           # build (or rebuild) images only
+docker compose restart web     # restart one service
+```
+
+Run management commands as one-off containers:
+
+```bash
+docker compose run --rm web python manage.py migrate
+docker compose run --rm web python manage.py collectstatic --noinput
+docker compose run --rm web python manage.py createsuperuser
+```
+
+`docker compose run` starts a fresh container for the command; `docker compose exec web <cmd>` runs a command in an already-running service container.
+
+## Restart policy
+
+Add a restart policy so services come back after a reboot or crash:
+
+```yaml
+services:
+  web:
+    restart: unless-stopped
+  db:
+    restart: unless-stopped
+```
+
+`unless-stopped` restarts a container unless you stopped it manually. Combine this with Docker's own startup so the stack recovers after a server reboot.
+
+## Development Compose versus production Compose
+
+Development Compose often mounts source code into the container, enables reloaders, uses simple passwords, and exposes convenience ports. Production Compose should use built images, private networks, real secret handling, pinned versions, backups, logs, and controlled public ports.
+
+Do not copy a local development Compose file to production without reviewing every mount, port, environment variable, and command.
 
 ## Image, container, volume: do not mix them up
 
@@ -2835,9 +3374,152 @@ Inside Compose, `db` is a DNS name. From your laptop or the public internet, `db
 
 Deleting a container should not delete PostgreSQL data if the data lives in a named volume. Deleting the volume can delete the database.
 
-## Production questions before choosing Compose
+## Next
 
-Before using Compose on a server, answer:
+Compose makes the topology explicit but does not make it production-safe. [Docker in production](../dockerization/production-docker.md) covers secrets, image pinning, registries, backups, logs, and deployment.
+
+---
+
+<!-- Source: dockerization/production-docker.md -->
+
+# 24. Docker in production
+
+Docker changes where your app runs, not what you are responsible for. This chapter turns the previous chapters' images and Compose files into something you can safely operate on a server.
+
+## Security baseline
+
+- **Do not put secrets in the Dockerfile** (no `ENV SECRET_KEY=...`) and **do not commit a real `.env` file**. A secret baked into a layer travels with the image through every registry and cache.
+- **Run containers as a non-root user.** The Dockerfile should end with `USER app`.
+- **Pin base images** (`python:3.13-slim`, `postgres:16`) and rebuild on a schedule to pick up security fixes. Floating tags such as `latest` are not a versioning strategy.
+- **Do not publish database or cache ports.** Publish only the proxy's `80`/`443`. PostgreSQL and Redis stay on the private Compose network.
+- **Persist database and media** in named volumes or external storage.
+- **Back up database data outside the Docker host.** A container and its volume live on one machine; a disk failure can take both.
+- **Add health checks** so Compose and orchestrators know when a service is actually ready.
+
+## Where secrets come from
+
+Compose resolves `${POSTGRES_PASSWORD}` and similar variables from:
+
+1. the shell environment of whoever runs `docker compose`,
+2. a `.env` file in the project directory,
+3. `environment:` or `env_file:` in the service definition.
+
+For a server deployment, prefer a dedicated environment file that is outside Git, owned by a deploy user, and mode `600`. Load it explicitly:
+
+```bash
+docker compose --env-file /etc/<APP_NAME>/<APP_NAME>.env up -d
+```
+
+Keep the secrets in one place and pass them in; never hard-code them in `docker-compose.yml`.
+
+## Registries and image delivery
+
+Building an image on the production server works for one box, but a **registry** is the cleaner flow: build once (locally or in CI), push, then pull the exact tag everywhere.
+
+```bash
+docker build -t ghcr.io/<ORG>/<APP_NAME>:0.1.0 .
+docker push ghcr.io/<ORG>/<APP_NAME>:0.1.0
+```
+
+On the server:
+
+```bash
+docker pull ghcr.io/<ORG>/<APP_NAME>:0.1.0
+```
+
+A registry gives you versioned, immutable artifacts and a clean rollback story. Use a private registry (GitHub Container Registry, GitLab, Docker Hub private, or a cloud registry) for private code. A public image of a proprietary app is a leak, not a feature.
+
+## Deploying with Compose on one VPS
+
+A minimal production layout on a single server:
+
+```text
+/srv/<APP_NAME>/
+├── docker-compose.yml      # production Compose file
+├── .env                    # secrets, mode 600, not in Git
+├── Caddyfile               # proxy config (or use a proxy image)
+└── <APP_NAME>.env          # app environment (optional separate file)
+```
+
+The deploy step is a tagged pull plus a recreate:
+
+```bash
+docker compose pull
+docker compose up -d --no-deps web
+```
+
+`--no-deps` restarts only the web service, leaving the database running. Compose starts a new container from the new image and stops the old one, which gives you a short restart rather than a full stack teardown. For a zero-downtime deployment you need more than one web replica and a load balancer; see [Scaling](../operations/scaling.md).
+
+### Run migrations before starting the new code
+
+```bash
+docker compose run --rm web python manage.py migrate
+docker compose run --rm web python manage.py collectstatic --noinput
+docker compose up -d --no-deps web
+```
+
+Apply migrations with the old code still serving when possible, then start the new image. See [Safe deployments](../operations/deployment-runbooks.md).
+
+## Static files and media
+
+Decide where they live before you go live:
+
+- **Static files** are best collected at build time (`RUN python manage.py collectstatic --noinput`) and served by the proxy or a CDN. If you collect into a shared named volume, do it once and keep the proxy pointed at it.
+- **Media files** are user uploads. They must persist outside the container. Use a named volume or, better, object storage (S3-compatible) so media survives server and container replacement.
+
+## Backups
+
+The database runs in a container, but backups are a host-level responsibility:
+
+```bash
+docker compose exec -T db pg_dump -U <DB_USER> -d <DB_NAME> --format=custom > backup.dump
+```
+
+Schedule this with a host cron job or systemd timer, verify the dump with `pg_restore --list`, and copy it **off the host** to object storage or another server. A backup that only lives on the same disk as the database is not a backup. See [Backups and disaster recovery](../operations/backups-and-disaster-recovery.md).
+
+## Logs
+
+Containers write to stdout/stderr, and `docker compose logs` reads them back. For a long-running server you should also ship logs to a collector or use the Docker logging driver:
+
+```yaml
+services:
+  web:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+```
+
+`max-size`/`max-file` rotate the JSON logs so a chatty app cannot fill the disk. See [Observability](../operations/observability-and-incidents.md) for monitoring and alerting.
+
+## Resource limits
+
+A container can consume all available CPU and memory unless you limit it. For a busy host, set explicit limits:
+
+```yaml
+services:
+  web:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+```
+
+These limits matter most when several services share one host or when a memory leak could take down the box. They do not replace fixing the leak.
+
+## Common production mistakes
+
+- shipping a `.env` file or secret inside the image;
+- running the container as root;
+- publishing PostgreSQL/Redis ports to the public internet;
+- using `latest` as the deployed tag with no rollback path;
+- keeping the database on a bind mount or, worse, in the container filesystem;
+- backing up only to the same host;
+- copying a development Compose file (reloaders, mounted code, open ports) into production.
+
+## Production questions to answer before going live
 
 - Where are images built: server, CI, registry?
 - How are secrets provided without committing `.env`?
@@ -2847,14 +3529,15 @@ Before using Compose on a server, answer:
 - How are containers restarted after reboot?
 - How are logs collected and rotated?
 - How are image updates tested and rolled back?
+- What is the memory/CPU budget per service?
 
-Compose can be clean and practical, but it does not answer those questions for you.
+Compose can be clean and practical, but it does not answer those questions for you. Dockerization removes environment surprises; it does not remove operations.
 
 ---
 
 <!-- Source: deployment-stacks/managed-platforms-and-kubernetes.md -->
 
-# 21. PaaS, managed hosting, serverless, and Kubernetes
+# 25. PaaS, managed hosting, serverless, and Kubernetes
 
 ## Managed PaaS
 
@@ -2992,7 +3675,7 @@ Kubernetes is powerful, but it moves complexity from one server into a platform.
 
 <!-- Source: deployment-stacks/uwsgi-nginx.md -->
 
-# 22. uWSGI + Nginx
+# 26. uWSGI + Nginx
 
 uWSGI is another production WSGI application server. Django documents how to integrate it with Django, and Nginx can proxy to it using the uWSGI protocol.
 
@@ -3160,7 +3843,7 @@ If you already know Gunicorn, choose uWSGI only for a specific operational reaso
 
 <!-- Source: deployment-stacks/other-options.md -->
 
-# 23. Other valid options and where they fit
+# 27. Other valid options and where they fit
 
 The main stacks in this book cover the usual first choices. These tools are also valid in particular environments.
 
@@ -3275,7 +3958,7 @@ If you cannot answer those questions, the stack is not ready for production yet.
 
 <!-- Source: operations/tls-and-https.md -->
 
-# 24. TLS, HTTPS, redirects, and HSTS
+# 28. TLS, HTTPS, redirects, and HSTS
 
 HTTPS is HTTP protected by TLS. TLS provides confidentiality, integrity, and server identity verification for browser-to-server traffic.
 
@@ -3373,7 +4056,7 @@ The important rule is not "close port 80." The important rule is "do not serve s
 
 <!-- Source: operations/firewall-ssh-and-host-security.md -->
 
-# 25. Firewall, SSH, Fail2Ban, and host security
+# 29. Firewall, SSH, Fail2Ban, and host security
 
 ## UFW baseline
 
@@ -3505,7 +4188,7 @@ Fail2Ban should reduce noisy brute-force attempts, but it is not your primary se
 
 <!-- Source: operations/deployment-runbooks.md -->
 
-# 26. Safe deployments, migrations, and rollbacks
+# 30. Safe deployments, migrations, and rollbacks
 
 A deployment should be a documented operation, not a memory test.
 
@@ -3686,7 +4369,7 @@ If migrations changed the database in a non-compatible way, code rollback may no
 
 <!-- Source: operations/observability-and-incidents.md -->
 
-# 27. Logging, monitoring, and incident response
+# 31. Logging, monitoring, and incident response
 
 ## Logs are evidence
 
@@ -3810,7 +4493,7 @@ The point is not blame. The point is to make the next failure smaller, faster to
 
 <!-- Source: operations/backups-and-disaster-recovery.md -->
 
-# 28. Backups, restore drills, and disaster recovery
+# 32. Backups, restore drills, and disaster recovery
 
 A backup is only useful if it can be restored. A backup stored only on the same VPS is not sufficient for full server loss.
 
@@ -3949,7 +4632,7 @@ These are business decisions, not only technical settings. A hobby blog and a pa
 
 <!-- Source: operations/testing-ci-and-staging.md -->
 
-# 29. Testing, CI, staging, and smoke tests
+# 33. Testing, CI, staging, and smoke tests
 
 ## Testing ladder
 
@@ -4089,7 +4772,7 @@ CI answers "does this revision pass automated checks?" Deployment answers "is th
 
 <!-- Source: operations/scaling.md -->
 
-# 30. Scaling without premature complexity
+# 34. Scaling without premature complexity
 
 Scaling is not only adding servers. First identify the bottleneck.
 
@@ -4192,7 +4875,7 @@ Managed databases, Redis, object storage, CDN, and email providers are often che
 
 <!-- Source: open-source/publishing-a-project.md -->
 
-# 31. Publishing an open-source project
+# 35. Publishing an open-source project
 
 Public code is not automatically an open-source project. A usable public project needs a license, accurate setup instructions, contribution expectations, and a security path.
 
@@ -4259,7 +4942,7 @@ Keep technical documentation in Markdown next to the code. This makes setup inst
 
 <!-- Source: open-source/license-governance-and-security.md -->
 
-# 32. License, governance, contribution, and security policy
+# 36. License, governance, contribution, and security policy
 
 ## Choose a license intentionally
 
@@ -4329,7 +5012,7 @@ Documentation has code-like quality rules. Ask contributors to keep commands cop
 
 <!-- Source: open-source/releases-and-maintenance.md -->
 
-# 33. Releases, SemVer, changelogs, and support
+# 37. Releases, SemVer, changelogs, and support
 
 ## Git commits, tags, and releases
 

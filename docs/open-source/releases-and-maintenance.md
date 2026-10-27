@@ -1,4 +1,4 @@
-# 33. Releases, SemVer, changelogs, and support
+# 37. Releases, SemVer, changelogs, and support
 
 ## Git commits, tags, and releases
 

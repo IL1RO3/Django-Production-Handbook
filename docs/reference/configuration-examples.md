@@ -16,6 +16,8 @@ This page links to the templates in `config-examples/`. They are intentionally g
 | [`config-examples/db-backup.service`](../config-examples/db-backup.service) | backup service |
 | [`config-examples/db-backup.timer`](../config-examples/db-backup.timer) | nightly backup timer |
 | [`config-examples/ci.yml`](../config-examples/ci.yml) | GitHub Actions basic test job |
+| [`config-examples/Dockerfile`](../config-examples/Dockerfile) | production-shaped Django image build |
+| [`config-examples/dockerignore.example`](../config-examples/dockerignore.example) | files to exclude from the build context (save as `.dockerignore`) |
 | [`config-examples/docker-compose.yml`](../config-examples/docker-compose.yml) | conceptual Compose topology |
 
 Read the accompanying stack/operations chapter before using a template. Config files are not interchangeable: proxy headers, locations, socket paths, users, and TLS ownership must match the selected stack.

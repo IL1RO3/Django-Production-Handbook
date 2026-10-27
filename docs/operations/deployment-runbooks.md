@@ -1,4 +1,4 @@
-# 26. Safe deployments, migrations, and rollbacks
+# 30. Safe deployments, migrations, and rollbacks
 
 A deployment should be a documented operation, not a memory test.
 
